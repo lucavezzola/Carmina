@@ -1,0 +1,47 @@
+### Environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+### Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+*.egg-info/
+dist/
+build/
+htmlcov/
+.coverage
+.coverage.*
+
+### Node.js
+node_modules/
+
+### IDEs and editors
+.idea/
+.vscode/
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+
+### Local databases and runtime files
+*.sqlite
+*.sqlite3
+*.db
+*.pid
+
+### Speech recognition model
+.model/
