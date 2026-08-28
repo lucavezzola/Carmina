@@ -1,14 +1,19 @@
 import json
 import queue
 import sys
-import time
 
 import sounddevice as sd
 from vosk import KaldiRecognizer, Model
 
 
 # ===== CONFIGURAZIONE =====
-SPELLS_LIST = ["fulmine", "scudo", "fuoco", "ghiaccio"] # Lista di incantesimi da riconoscere
+# !! IMPORTANTE !!
+# La stringa di 'grammatica' "palla di fuoco" verrebbe riconosciuta sia
+# come "palla" che "di" che "fuoco" che ogni combinazione delle tre
+# come per esempio "di di palla fuoco palla".
+# Quindi si dovrebbero usare delle spell formate da una sola parola oppure
+# implementare un controllo del tipo "if spell in SPELLS_LIST:".
+SPELLS_LIST = ["fulmine", "scudo", "palla di fuoco", "ghiaccio", "scambio", "salta"] # Lista di incantesimi da riconoscere
 MODEL_PATH = "model"
 SAMPLE_RATE = 16000 # Frequenza di campionamento standard per i modelli Vosk
 BLOCK_SIZE = 8000 # Dimensione dei blocchi di audio analizzati
@@ -33,26 +38,20 @@ def main():
   
   # ===== CREAZIONE CODA BLOCCHI AUDIO DA MICROFONO =====
   audio_queue = queue.Queue() # Coda per passare i blocchi dal thread del mic al ciclo principale
-  def callback(indata, frames, time_info, status):
+  def callback(indata, frames, _time_info, status):
     if status:
       print(f"[avviso audio] {status}", file=sys.stderr)
     audio_queue.put(bytes(indata))
   
   # ===== APERTURA STREAM AUDIO E CICLO DI RICONOSCIMENTO =====
   try:
-    timerStart = None
     with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=BLOCK_SIZE, dtype="int16", channels=1, callback=callback) as stream:
       print(f"Sample rate effettivo dello stream: {stream.samplerate}")
       
       while True:
         data = audio_queue.get()
         
-        if timerStart is None:
-          timerStart = time.perf_counter()
-        
         if recognizer.AcceptWaveform(data):
-          print(f"Durata: {time.perf_counter()-timerStart} s")
-          
           result = json.loads(recognizer.Result())
           words = result.get("result", [])
           text = result.get("text", "").strip()
@@ -62,8 +61,6 @@ def main():
               print(f">> Riconosciuto: {text} (conf: {confidence:.2f})")
             else:
               print(f"!% Scartato: {text} (conf: {confidence:.2f}))")
-          
-          timerStart = time.perf_counter()
         
         else:
           # Risultato parziale, utile per debug ma silenziato qui
