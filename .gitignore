@@ -44,4 +44,4 @@ node_modules/
 *.pid
 
 ### Speech recognition model
-.model/
+model/
