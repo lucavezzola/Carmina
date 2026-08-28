@@ -9,7 +9,7 @@ from vosk import KaldiRecognizer, Model
 
 
 # ===== CONFIGURAZIONE =====
-SPELLS_LIST = ["fulmine", "scudo", "palla di fuoco", "ghiaccio", "scambio", "salto"] # Lista di incantesimi da riconoscere
+SPELLS_LIST = ["fulmine", "scudo", "palla di fuoco", "ghiaccio", "scambio", "salta"] # Lista di incantesimi da riconoscere
 MODEL_PATH = "model"
 SAMPLE_RATE = 16000 # Frequenza di campionamento standard per i modelli Vosk
 BLOCK_SIZE = 8000 # Dimensione dei blocchi di audio analizzati
@@ -70,13 +70,14 @@ def main():
         data = audio_queue.get()
         
         if recognizer.AcceptWaveform(data):
-          result = json.loads(recognizer.Result())
-          text = result.get("text", "").strip() # Testo definitivo dopo la pausa
-          final_spells = find_spells(text)
-          # Mostra solo gli incantesimi non gia stampati durante il riconoscimento parziale
-          print(f"Blocco di testo completo: {text}")
-          # for spell in final_spells[emitted_spell_count:]:
-          #   print(f">> Riconosciuto: {spell}")
+          # Se una parola è stata riconosciuta come una delle spells alla fine
+          # è perchè è una trascrizione più accurata. Però potrebbe venire dopo
+          # qualche secondo, quindi non è accettabile perchè potrebbe anche
+          # causare latenze lunghe qualche secondo.
+          
+          # Ritornerebbe il testo trascritto ma lo usiamo "a vuoto" per svuotare la trascrizione
+          recognizer.Result()
+          
           emitted_spell_count = 0 # Azzera il conteggio per la frase successiva
           partial_checked_until = 0 # Azzera la posizione per la frase successiva
         
