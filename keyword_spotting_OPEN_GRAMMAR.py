@@ -74,8 +74,9 @@ def main():
           text = result.get("text", "").strip() # Testo definitivo dopo la pausa
           final_spells = find_spells(text)
           # Mostra solo gli incantesimi non gia stampati durante il riconoscimento parziale
-          for spell in final_spells[emitted_spell_count:]:
-            print(f">> Riconosciuto: {spell}")
+          print(f"Blocco di testo completo: {text}")
+          # for spell in final_spells[emitted_spell_count:]:
+          #   print(f">> Riconosciuto: {spell}")
           emitted_spell_count = 0 # Azzera il conteggio per la frase successiva
           partial_checked_until = 0 # Azzera la posizione per la frase successiva
         
