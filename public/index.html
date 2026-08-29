@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<title>Fase 3 - Il Nucleo Arcano</title>
+<title>Fase 4 - L'Arena dei Nuclei</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
 <style>
@@ -29,10 +29,7 @@
     letter-spacing: 0.06em; color: var(--ink);
     text-shadow: 0 0 18px rgba(163, 213, 255, 0.35);
   }
-  #stato {
-    font-size: 0.8rem; color: var(--ink-dim); margin-top: 4px;
-    letter-spacing: 0.03em;
-  }
+  #stato { font-size: 0.8rem; color: var(--ink-dim); margin-top: 4px; letter-spacing: 0.03em; }
   #btnConnetti {
     pointer-events: auto;
     background: transparent; color: var(--ink);
@@ -47,25 +44,27 @@
     position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
     display: flex; gap: 28px;
   }
-  .incantesimo {
-    font-family: 'Cinzel', serif; text-align: center; width: 92px;
-  }
-  .incantesimo .nome {
-    font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase;
-  }
+  .incantesimo { font-family: 'Cinzel', serif; text-align: center; width: 92px; }
+  .incantesimo .nome { font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
   .incantesimo .barra {
-    margin-top: 8px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.08);
-    overflow: hidden;
+    margin-top: 8px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden;
   }
-  .incantesimo .barra .riempi {
-    height: 100%; width: 100%; transform-origin: left; transition: transform 0.05s linear;
-  }
+  .incantesimo .barra .riempi { height: 100%; width: 100%; transform-origin: left; transition: transform 0.05s linear; }
   .fulmine .nome { color: var(--fulmine); }
   .fulmine .riempi { background: var(--fulmine); box-shadow: 0 0 8px var(--fulmine); }
   .scudo .nome { color: var(--scudo); }
   .scudo .riempi { background: var(--scudo); box-shadow: 0 0 8px var(--scudo); }
   .fuoco .nome { color: var(--fuoco); }
   .fuoco .riempi { background: var(--fuoco); box-shadow: 0 0 8px var(--fuoco); }
+
+  .etichetta {
+    position: fixed; transform: translate(-50%, -100%);
+    font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.05em;
+    color: var(--ink-dim); text-transform: uppercase; pointer-events: none;
+    text-shadow: 0 0 6px rgba(0,0,0,0.8);
+    white-space: nowrap;
+  }
+  .etichetta.tu { color: #fff; }
 </style>
 </head>
 <body>
@@ -74,7 +73,7 @@
 
 <div id="hud">
   <div>
-    <div id="titolo">Il Nucleo Arcano</div>
+    <div id="titolo">L'Arena dei Nuclei</div>
     <div id="stato">Non connesso</div>
   </div>
   <button id="btnConnetti">Connetti microfono</button>
@@ -95,34 +94,35 @@
   </div>
 </div>
 
+<div id="etichette"></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ============================================================
 // CONFIGURAZIONE
 // ============================================================
-const WS_URL = "ws://localhost:8765";
-const COOLDOWN_MS = 1800; // durata cooldown per incantesimo, in millisecondi
+const WS_URL = "wss://192.168.1.170:8765";
+const COOLDOWN_MS = 1800;       // deve combaciare con COOLDOWN_MS nel server
+const SLOT_MASSIMI = 5;
+const RAGGIO_ARENA = 3.2;
 
-const COLORI = {
-  fulmine: 0xa3d5ff,
-  scudo:   0x4fd1c5,
-  fuoco:   0xff6b35,
-};
+const COLORI = { fulmine: 0xa3d5ff, scudo: 0x4fd1c5, fuoco: 0xff6b35 };
 
 // ============================================================
 // SCENA THREE.JS
 // ============================================================
 const canvas = document.getElementById("scene");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x0b0e1a, 0.045);
+scene.fog = new THREE.FogExp2(0x0b0e1a, 0.035);
 
+// Camera d'arena: vista dall'alto ad angolo, per abbracciare tutti gli slot
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
-camera.position.set(0, 1.4, 6.5);
-camera.lookAt(0, 0.6, 0);
+camera.position.set(0, 8.5, 7.5);
+camera.lookAt(0, 0, 0);
 
 window.addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
@@ -130,60 +130,83 @@ window.addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// Pavimento: un disco scuro riflettente per dare profondità alla scena
 const pavimento = new THREE.Mesh(
-  new THREE.CircleGeometry(8, 64),
+  new THREE.CircleGeometry(RAGGIO_ARENA + 1.5, 64),
   new THREE.MeshStandardMaterial({ color: 0x11152a, roughness: 0.6, metalness: 0.2 })
 );
 pavimento.rotation.x = -Math.PI / 2;
-pavimento.position.y = -1.2;
 scene.add(pavimento);
 
-// Luci
 scene.add(new THREE.AmbientLight(0x404060, 0.8));
-const luceNucleo = new THREE.PointLight(0xffffff, 2, 8);
-luceNucleo.position.set(0, 0.6, 0);
-scene.add(luceNucleo);
-
-// Il nucleo arcano: l'elemento "personaggio" che reagisce agli incantesimi
-const nucleoGeom = new THREE.IcosahedronGeometry(0.7, 1);
-const nucleoMat = new THREE.MeshStandardMaterial({
-  color: 0x2a3050,
-  emissive: 0x3a4a8a,
-  emissiveIntensity: 0.6,
-  roughness: 0.3,
-  metalness: 0.4,
-  flatShading: true,
-});
-const nucleo = new THREE.Mesh(nucleoGeom, nucleoMat);
-nucleo.position.y = 0.6;
-scene.add(nucleo);
-
-// Guscio esterno sottile, sempre presente, per dare profondità al nucleo
-const guscioGeom = new THREE.IcosahedronGeometry(0.78, 1);
-const guscioMat = new THREE.MeshBasicMaterial({ color: 0x8a9cff, wireframe: true, transparent: true, opacity: 0.25 });
-const guscio = new THREE.Mesh(guscioGeom, guscioMat);
-guscio.position.copy(nucleo.position);
-scene.add(guscio);
 
 // ============================================================
-// EFFETTI PER INCANTESIMO
+// POSIZIONAMENTO SLOT: server e client concordano sulla stessa
+// formula, quindi basta trasmettere l'indice dello slot.
 // ============================================================
+function posizioneSlot(slot) {
+  const angolo = (slot / SLOT_MASSIMI) * Math.PI * 2;
+  return new THREE.Vector3(Math.sin(angolo) * RAGGIO_ARENA, 0.6, Math.cos(angolo) * RAGGIO_ARENA);
+}
 
-// Sistema di particelle generico e riutilizzabile per tutti gli effetti
-function creaParticelle(colore, numero) {
+// ============================================================
+// GESTIONE NUCLEI (uno per giocatore connesso)
+// ============================================================
+const nuclei = {}; // slot -> { mesh, guscio, luce, mat, etichettaEl, scudoMesh }
+let mioSlot = null;
+
+function creaNucleo(slot) {
+  const pos = posizioneSlot(slot);
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x2a3050, emissive: 0x3a4a8a, emissiveIntensity: 0.6,
+    roughness: 0.3, metalness: 0.4, flatShading: true,
+  });
+  const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 1), mat);
+  mesh.position.copy(pos);
+  scene.add(mesh);
+
+  const guscio = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.62, 1),
+    new THREE.MeshBasicMaterial({ color: 0x8a9cff, wireframe: true, transparent: true, opacity: 0.25 })
+  );
+  guscio.position.copy(pos);
+  scene.add(guscio);
+
+  const luce = new THREE.PointLight(0xffffff, 1.6, 5);
+  luce.position.copy(pos);
+  scene.add(luce);
+
+  const etichettaEl = document.createElement("div");
+  etichettaEl.className = "etichetta" + (slot === mioSlot ? " tu" : "");
+  etichettaEl.textContent = slot === mioSlot ? "Tu" : `Giocatore ${slot + 1}`;
+  document.getElementById("etichette").appendChild(etichettaEl);
+
+  nuclei[slot] = { mesh, guscio, luce, mat, etichettaEl, scudoMesh: null, pos };
+}
+
+function rimuoviNucleo(slot) {
+  const n = nuclei[slot];
+  if (!n) return;
+  scene.remove(n.mesh, n.guscio, n.luce);
+  if (n.scudoMesh) scene.remove(n.scudoMesh);
+  n.etichettaEl.remove();
+  delete nuclei[slot];
+}
+
+// ============================================================
+// EFFETTI (ora parametrizzati per slot bersaglio)
+// ============================================================
+let particelleAttive = [];
+
+function creaParticelle(colore, numero, origine) {
   const geom = new THREE.BufferGeometry();
   const posizioni = new Float32Array(numero * 3);
   const velocita = [];
   for (let i = 0; i < numero; i++) {
-    posizioni[i * 3 + 0] = 0;
-    posizioni[i * 3 + 1] = 0.6;
-    posizioni[i * 3 + 2] = 0;
-    velocita.push(new THREE.Vector3(
-      (Math.random() - 0.5) * 2,
-      Math.random() * 2 + 0.5,
-      (Math.random() - 0.5) * 2
-    ));
+    posizioni[i * 3 + 0] = origine.x;
+    posizioni[i * 3 + 1] = origine.y;
+    posizioni[i * 3 + 2] = origine.z;
+    velocita.push(new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 2 + 0.5, (Math.random() - 0.5) * 2));
   }
   geom.setAttribute("position", new THREE.BufferAttribute(posizioni, 3));
   const mat = new THREE.PointsMaterial({ color: colore, size: 0.06, transparent: true, opacity: 1 });
@@ -192,76 +215,67 @@ function creaParticelle(colore, numero) {
   return { punti, velocita, nato: performance.now(), vita: 900 };
 }
 
-let particelleAttive = [];
-
-function effettoFulmine() {
-  // Flash rapido di luce bianca + scarica visibile che colpisce il nucleo dall'alto
-  luceNucleo.color.set(0xffffff);
-  luceNucleo.intensity = 6;
-  nucleoMat.emissive.set(COLORI.fulmine);
-  nucleoMat.emissiveIntensity = 2.2;
+function effettoFulmine(slot) {
+  const n = nuclei[slot];
+  if (!n) return;
+  n.luce.color.set(0xffffff);
+  n.luce.intensity = 5;
+  n.mat.emissive.set(COLORI.fulmine);
+  n.mat.emissiveIntensity = 2.2;
 
   const puntiBolt = [];
-  let x = 0, y = 4;
-  while (y > nucleo.position.y) {
-    puntiBolt.push(new THREE.Vector3(x, y, 0));
+  let x = n.pos.x, y = n.pos.y + 3.4;
+  while (y > n.pos.y) {
+    puntiBolt.push(new THREE.Vector3(x, y, n.pos.z));
     x += (Math.random() - 0.5) * 0.5;
     y -= 0.4;
   }
-  const boltGeom = new THREE.BufferGeometry().setFromPoints(puntiBolt);
-  const boltMat = new THREE.LineBasicMaterial({ color: COLORI.fulmine, transparent: true, opacity: 1 });
-  const bolt = new THREE.Line(boltGeom, boltMat);
+  const bolt = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(puntiBolt),
+    new THREE.LineBasicMaterial({ color: COLORI.fulmine })
+  );
   scene.add(bolt);
   setTimeout(() => scene.remove(bolt), 150);
 
-  particelleAttive.push(creaParticelle(COLORI.fulmine, 40));
+  particelleAttive.push(creaParticelle(COLORI.fulmine, 30, n.pos));
 }
 
-let scudoMesh = null;
-function effettoScudo() {
-  if (scudoMesh) scene.remove(scudoMesh);
-  const geom = new THREE.SphereGeometry(1.1, 32, 32);
-  const mat = new THREE.MeshBasicMaterial({
-    color: COLORI.scudo, transparent: true, opacity: 0.22,
-    side: THREE.DoubleSide,
-  });
-  scudoMesh = new THREE.Mesh(geom, mat);
-  scudoMesh.position.copy(nucleo.position);
-  scudoMesh.scale.setScalar(0.01);
-  scene.add(scudoMesh);
-  scudoMesh.userData.nato = performance.now();
+function effettoScudo(slot) {
+  const n = nuclei[slot];
+  if (!n) return;
+  if (n.scudoMesh) scene.remove(n.scudoMesh);
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.9, 32, 32),
+    new THREE.MeshBasicMaterial({ color: COLORI.scudo, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
+  );
+  mesh.position.copy(n.pos);
+  mesh.scale.setScalar(0.01);
+  mesh.userData.nato = performance.now();
+  scene.add(mesh);
+  n.scudoMesh = mesh;
 }
 
-function effettoFuoco() {
-  nucleoMat.emissive.set(COLORI.fuoco);
-  nucleoMat.emissiveIntensity = 1.6;
-  particelleAttive.push(creaParticelle(COLORI.fuoco, 60));
+function effettoFuoco(slot) {
+  const n = nuclei[slot];
+  if (!n) return;
+  n.mat.emissive.set(COLORI.fuoco);
+  n.mat.emissiveIntensity = 1.6;
+  particelleAttive.push(creaParticelle(COLORI.fuoco, 45, n.pos));
 }
 
 const EFFETTI = { fulmine: effettoFulmine, scudo: effettoScudo, fuoco: effettoFuoco };
 
 // ============================================================
-// COOLDOWN E HUD
+// HUD: cooldown SOLO del proprio giocatore
 // ============================================================
-const ultimoLancio = { fulmine: 0, scudo: 0, fuoco: 0 };
+const ultimoLancioLocale = { fulmine: 0, scudo: 0, fuoco: 0 };
 const barre = {};
 document.querySelectorAll(".riempi").forEach(el => barre[el.dataset.spell] = el);
-
-function pronto(nome) {
-  return performance.now() - ultimoLancio[nome] >= COOLDOWN_MS;
-}
-
-function lanciaIncantesimo(nome) {
-  if (!EFFETTI[nome] || !pronto(nome)) return;
-  ultimoLancio[nome] = performance.now();
-  EFFETTI[nome]();
-}
 
 function aggiornaBarreCooldown() {
   const ora = performance.now();
   for (const nome in barre) {
-    const trascorso = ora - ultimoLancio[nome];
-    const frazione = Math.min(trascorso / COOLDOWN_MS, 1);
+    const frazione = Math.min((ora - ultimoLancioLocale[nome]) / COOLDOWN_MS, 1);
     barre[nome].style.transform = `scaleX(${frazione})`;
   }
 }
@@ -269,29 +283,33 @@ function aggiornaBarreCooldown() {
 // ============================================================
 // LOOP DI ANIMAZIONE
 // ============================================================
+const proiettore = new THREE.Vector3();
+
 function anima() {
   requestAnimationFrame(anima);
   const t = performance.now() * 0.001;
 
-  // idle: rotazione lenta e pulsazione del nucleo
-  nucleo.rotation.y = t * 0.3;
-  nucleo.rotation.x = Math.sin(t * 0.4) * 0.1;
-  guscio.rotation.y = -t * 0.15;
+  for (const slot in nuclei) {
+    const n = nuclei[slot];
+    n.mesh.rotation.y = t * 0.3 + slot;
+    n.mesh.rotation.x = Math.sin(t * 0.4 + slot) * 0.1;
+    n.guscio.rotation.y = -t * 0.15;
+    n.luce.intensity += (1.6 - n.luce.intensity) * 0.05;
+    n.mat.emissiveIntensity += (0.6 - n.mat.emissiveIntensity) * 0.04;
 
-  // decadimento verso lo stato di riposo di luce ed emissione
-  luceNucleo.intensity += (2 - luceNucleo.intensity) * 0.05;
-  nucleoMat.emissiveIntensity += (0.6 - nucleoMat.emissiveIntensity) * 0.04;
+    if (n.scudoMesh) {
+      const eta = performance.now() - n.scudoMesh.userData.nato;
+      n.scudoMesh.scale.setScalar(Math.min(eta / 250, 1));
+      n.scudoMesh.material.opacity = 0.22 * Math.max(0, 1 - Math.max(0, eta - 1800) / 600);
+      if (eta > 2400) { scene.remove(n.scudoMesh); n.scudoMesh = null; }
+    }
 
-  // aggiorna lo scudo, se presente: cresce e poi svanisce
-  if (scudoMesh) {
-    const eta = performance.now() - scudoMesh.userData.nato;
-    const scala = Math.min(eta / 250, 1);
-    scudoMesh.scale.setScalar(scala);
-    scudoMesh.material.opacity = 0.22 * Math.max(0, 1 - Math.max(0, eta - 1800) / 600);
-    if (eta > 2400) { scene.remove(scudoMesh); scudoMesh = null; }
+    // proietta la posizione 3D del nucleo sullo schermo per l'etichetta HTML
+    proiettore.copy(n.pos).project(camera);
+    n.etichettaEl.style.left = `${(proiettore.x * 0.5 + 0.5) * innerWidth}px`;
+    n.etichettaEl.style.top = `${(-proiettore.y * 0.5 + 0.5) * innerHeight - 46}px`;
   }
 
-  // aggiorna le particelle attive: le muove e le rimuove a fine vita
   particelleAttive = particelleAttive.filter(p => {
     const eta = performance.now() - p.nato;
     if (eta > p.vita) { scene.remove(p.punti); return false; }
@@ -300,7 +318,7 @@ function anima() {
       pos.array[i * 3 + 0] += p.velocita[i].x * 0.016;
       pos.array[i * 3 + 1] += p.velocita[i].y * 0.016;
       pos.array[i * 3 + 2] += p.velocita[i].z * 0.016;
-      p.velocita[i].y -= 0.03; // gravità leggera
+      p.velocita[i].y -= 0.03;
     }
     pos.needsUpdate = true;
     p.punti.material.opacity = 1 - eta / p.vita;
@@ -313,7 +331,7 @@ function anima() {
 anima();
 
 // ============================================================
-// CONNESSIONE AUDIO (identica alla Fase 2, con trigger degli effetti)
+// CONNESSIONE: audio in uscita, stato di gioco in entrata
 // ============================================================
 const btn = document.getElementById("btnConnetti");
 const stato = document.getElementById("stato");
@@ -326,15 +344,36 @@ btn.addEventListener("click", async () => {
   ws = new WebSocket(WS_URL);
   ws.binaryType = "arraybuffer";
 
-  ws.onopen = async () => {
-    stato.textContent = "Connesso. Richiedo il microfono...";
-    await avviaMicrofono();
-    stato.textContent = "In ascolto. Pronuncia un incantesimo.";
-  };
+  ws.onopen = () => { stato.textContent = "Connesso. In attesa di conferma dal server..."; };
 
-  ws.onmessage = (event) => {
-    const dati = JSON.parse(event.data);
-    lanciaIncantesimo(dati.word);
+  ws.onmessage = async (event) => {
+    const msg = JSON.parse(event.data);
+
+    if (msg.type === "full") {
+      stato.textContent = "Server pieno (5 giocatori). Riprova più tardi.";
+      ws.close();
+      return;
+    }
+
+    if (msg.type === "welcome") {
+      mioSlot = msg.your_slot;
+      creaNucleo(mioSlot);
+      for (const slot of msg.players) creaNucleo(slot);
+      stato.textContent = "Richiedo il microfono...";
+      await avviaMicrofono();
+      stato.textContent = `In ascolto (slot ${mioSlot + 1}). Pronuncia un incantesimo.`;
+      return;
+    }
+
+    if (msg.type === "player_connected") { creaNucleo(msg.slot); return; }
+    if (msg.type === "player_disconnected") { rimuoviNucleo(msg.slot); return; }
+
+    if (msg.type === "spell") {
+      const effetto = EFFETTI[msg.word];
+      if (effetto) effetto(msg.slot);
+      if (msg.slot === mioSlot) ultimoLancioLocale[msg.word] = performance.now();
+      return;
+    }
   };
 
   ws.onclose = () => { stato.textContent = "Disconnesso."; ws = null; btn.disabled = false; };
