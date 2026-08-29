@@ -23,7 +23,7 @@ import re
 
 
 # ===== CONFIGURAZIONE =====
-SPELLS_LIST = ["fulmine", "scudo", "palla di fuoco", "ghiaccio", "scambio", "salta"] # Lista di incantesimi da riconoscere
+SPELLS_LIST = ["fulmine", "scudo", "fuoco"] # Lista di incantesimi da riconoscere
 MODEL_PATH = "model"
 SAMPLE_RATE = 16000 # Frequenza di campionamento standard per i modelli Vosk
 
