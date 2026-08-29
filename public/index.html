@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8">
+    <title>Fase 2 - Test riconoscimento vocale</title>
+    <style>
+      body { font-family: sans-serif; background:#111; color:#eee; text-align:center; padding-top:60px; }
+      button { font-size: 1.2rem; padding: 12px 24px; border-radius: 8px; border:none; cursor:pointer; }
+      #stato { margin-top: 20px; font-size: 1rem; color: #888; }
+      #parola { margin-top: 40px; font-size: 3rem; font-weight: bold; min-height: 1.2em; }
+    </style>
+  </head>
+  <body>
+    <h1>Test Fase 2: microfono → server → riconoscimento</h1>
+    <button id="btnConnetti">Connetti microfono</button>
+    <div id="stato">Non connesso</div>
+    <div id="parola"></div>
+
+    <script>
+    const WS_URL = "ws://localhost:8765"; // se testi da un altro dispositivo in LAN, usa l'IP del server
+
+    const btn = document.getElementById("btnConnetti");
+    const stato = document.getElementById("stato");
+    const parolaDiv = document.getElementById("parola");
+
+    let ws, audioContext, workletNode, micStream;
+
+    btn.addEventListener("click", async () => {
+      if (ws) return; // già connesso
+
+      stato.textContent = "Connessione al server...";
+      ws = new WebSocket(WS_URL);
+      ws.binaryType = "arraybuffer";
+
+      ws.onopen = async () => {
+        stato.textContent = "Connesso. Richiedo il microfono...";
+        await avviaMicrofono();
+        stato.textContent = "In ascolto. Pronuncia un incantesimo.";
+      };
+
+      ws.onmessage = (event) => {
+        const dati = JSON.parse(event.data);
+        parolaDiv.textContent = dati.word;
+        // piccolo effetto: sparisce dopo un momento
+        setTimeout(() => { if (parolaDiv.textContent === dati.word) parolaDiv.textContent = ""; }, 1200);
+      };
+
+      ws.onclose = () => { stato.textContent = "Disconnesso."; ws = null; };
+      ws.onerror = (e) => { console.error(e); stato.textContent = "Errore di connessione."; };
+    });
+
+    async function avviaMicrofono() {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Vosk vuole 16kHz esatti: il vero resampling avviene dentro l'AudioWorklet,
+      // perché non tutti i browser permettono di fissare il sampleRate in ingresso.
+      audioContext = new AudioContext();
+
+      await audioContext.audioWorklet.addModule("pcm-processor.js");
+      const source = audioContext.createMediaStreamSource(micStream);
+      workletNode = new AudioWorkletNode(audioContext, "pcm-processor", {
+        processorOptions: { targetSampleRate: 16000, inputSampleRate: audioContext.sampleRate }
+      });
+
+      workletNode.port.onmessage = (event) => {
+        // event.data è un ArrayBuffer di Int16 PCM, pronto per essere inviato
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(event.data);
+        }
+      };
+
+      source.connect(workletNode);
+      // non serve collegare l'output agli speaker: niente workletNode.connect(audioContext.destination)
+    }
+    </script>
+  </body>
+</html>
