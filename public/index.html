@@ -2,40 +2,79 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<title>Prototipo: Mappa in Prima Persona</title>
+<title>Fase 5 - Mappa Multiplayer in Prima Persona</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
 <style>
   html, body { margin: 0; height: 100%; background: #87ceeb; overflow: hidden; }
   canvas#scene { position: fixed; inset: 0; display: block; }
-  #istruzioni {
+  body { font-family: system-ui, sans-serif; color: #cbd3e6; }
+
+  #overlay {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.55); color: #fff; font-family: system-ui, sans-serif;
-    text-align: center; cursor: pointer; z-index: 10;
+    background: rgba(0,0,0,0.55); color: #fff; text-align: center; cursor: pointer; z-index: 10;
   }
-  #istruzioni h2 { margin-bottom: 8px; }
-  #istruzioni p { color: #ccc; font-size: 0.9rem; }
-  #mirino {
+  #overlay h2 { font-family: 'Cinzel', serif; margin-bottom: 8px; }
+  #overlay p { color: #ccc; font-size: 0.9rem; }
+
+  #crosshair {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: 6px; height: 6px; border-radius: 50%; background: #fff;
-    box-shadow: 0 0 4px rgba(0,0,0,0.6); pointer-events: none;
+    box-shadow: 0 0 4px rgba(0,0,0,0.6); pointer-events: none; display: none;
   }
+
+  #hud { position: fixed; top: 20px; left: 20px; font-size: 0.8rem; color: #9aa3c0; }
+
+  #spells {
+    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 28px;
+  }
+  .spell { font-family: 'Cinzel', serif; text-align: center; width: 92px; }
+  .spell .name { font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .spell .bar { margin-top: 8px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .spell .fill { height: 100%; width: 100%; transform-origin: left; transition: transform 0.05s linear; }
+  .fulmine .name { color: #a3d5ff; } .fulmine .fill { background: #a3d5ff; box-shadow: 0 0 8px #a3d5ff; }
+  .scudo .name { color: #4fd1c5; } .scudo .fill { background: #4fd1c5; box-shadow: 0 0 8px #4fd1c5; }
+  .fuoco .name { color: #ff6b35; } .fuoco .fill { background: #ff6b35; box-shadow: 0 0 8px #ff6b35; }
 </style>
 </head>
 <body>
 
 <canvas id="scene"></canvas>
-<div id="mirino"></div>
-<div id="istruzioni">
+<div id="crosshair"></div>
+<div id="hud">Non connesso</div>
+<div id="overlay">
   <div>
     <h2>Clicca per entrare</h2>
-    <p>WASD per muoverti, mouse per guardarti intorno, ESC per uscire</p>
+    <p>WASD per muoverti, mouse per guardarti intorno, ESC per uscire<br>Pronuncia un incantesimo per lanciarlo</p>
   </div>
+</div>
+
+<div id="spells">
+  <div class="spell fulmine"><div class="name">Fulmine</div><div class="bar"><div class="fill" data-spell="fulmine"></div></div></div>
+  <div class="spell scudo"><div class="name">Scudo</div><div class="bar"><div class="fill" data-spell="scudo"></div></div></div>
+  <div class="spell fuoco"><div class="name">Fuoco</div><div class="bar"><div class="fill" data-spell="fuoco"></div></div></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
 <script>
 // ============================================================
-// SCENA BASE
+// CONFIGURAZIONE
+// ============================================================
+const WS_URL = "wss://192.168.1.170:8765"; // aggiorna con il tuo IP
+const COOLDOWN_MS = 1800;      // deve combaciare con COOLDOWN_MS nel server
+const MOVE_SPEED = 4.0;        // metri al secondo
+const EYE_HEIGHT = 1.7;
+const BODY_HEIGHT = 0.9;       // altezza approssimativa del corpo del mago, per gli effetti
+const PLAYER_RADIUS = 0.35;
+const POSITION_SEND_INTERVAL_MS = 100; // quante volte al secondo mandiamo la nostra posizione
+const REMOTE_LERP_FACTOR = 0.18;       // quanto velocemente gli altri giocatori "raggiungono" l'ultima posizione ricevuta
+
+const SPELL_COLORS = { fulmine: 0xa3d5ff, scudo: 0x4fd1c5, fuoco: 0xff6b35 };
+
+// ============================================================
+// SCENA BASE (identica al prototipo, ora con nomi in inglese)
 // ============================================================
 const canvas = document.getElementById("scene");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -47,7 +86,7 @@ scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 15, 55);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 200);
-camera.position.set(0, 1.7, 5); // 1.7 = altezza occhi approssimativa di una persona
+camera.position.set(0, EYE_HEIGHT, 5);
 
 window.addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
@@ -56,180 +95,431 @@ window.addEventListener("resize", () => {
 });
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x445533, 1.1));
-const sole = new THREE.DirectionalLight(0xfff4e0, 1.2);
-sole.position.set(10, 20, 8);
-scene.add(sole);
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.2);
+sun.position.set(10, 20, 8);
+scene.add(sun);
 
-// Terreno
-const terreno = new THREE.Mesh(
+const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(80, 80),
   new THREE.MeshStandardMaterial({ color: 0x3d6b3d })
 );
-terreno.rotation.x = -Math.PI / 2;
-scene.add(terreno);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
 
 // ============================================================
-// OSTACOLI: lista di { x, z, raggio } usata sia per posizionare
-// gli oggetti sia per le collisioni (li trattiamo come cilindri
-// visti dall'alto, ignorando l'altezza).
+// OSTACOLI STATICI (alberi ed edifici): { x, z, radius }
 // ============================================================
-const ostacoli = [];
+const obstacles = [];
 
-function creaAlbero(x, z) {
-  const gruppo = new THREE.Group();
-
-  const tronco = new THREE.Mesh(
+function createTree(x, z) {
+  const group = new THREE.Group();
+  const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(0.15, 0.2, 1.4, 8),
     new THREE.MeshStandardMaterial({ color: 0x5a3d2b })
   );
-  tronco.position.y = 0.7;
-  gruppo.add(tronco);
-
-  const chioma = new THREE.Mesh(
+  trunk.position.y = 0.7;
+  group.add(trunk);
+  const foliage = new THREE.Mesh(
     new THREE.ConeGeometry(1.1, 2.2, 8),
     new THREE.MeshStandardMaterial({ color: 0x2e5c2e })
   );
-  chioma.position.y = 2.2;
-  gruppo.add(chioma);
-
-  gruppo.position.set(x, 0, z);
-  scene.add(gruppo);
-  ostacoli.push({ x, z, raggio: 0.6 }); // raggio di collisione, un po' più stretto della chioma
+  foliage.position.y = 2.2;
+  group.add(foliage);
+  group.position.set(x, 0, z);
+  scene.add(group);
+  obstacles.push({ x, z, radius: 0.6 });
 }
 
-function creaEdificio(x, z, largo, alto, profondo, colore) {
-  const edificio = new THREE.Mesh(
-    new THREE.BoxGeometry(largo, alto, profondo),
-    new THREE.MeshStandardMaterial({ color: colore })
+function createBuilding(x, z, width, height, depth, color) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(width, height, depth),
+    new THREE.MeshStandardMaterial({ color })
   );
-  edificio.position.set(x, alto / 2, z);
-  scene.add(edificio);
-  // approssimiamo il rettangolo con un cerchio di collisione: raggio = metà diagonale
-  const raggio = Math.sqrt(largo * largo + profondo * profondo) / 2;
-  ostacoli.push({ x, z, raggio });
+  mesh.position.set(x, height / 2, z);
+  scene.add(mesh);
+  obstacles.push({ x, z, radius: Math.sqrt(width * width + depth * depth) / 2 });
 }
 
-// Il modello del mago: sfera (corpo) + cono (cappello). Riutilizzabile per
-// ogni giocatore che vedremo quando colleghiamo il multiplayer — il TUO
-// mago in prima persona non si vede mai (la camera È la sua testa), ma gli
-// altri giocatori li vedrai così.
-function creaMago(x, z, coloreVeste) {
-  const gruppo = new THREE.Group();
+for (let i = 0; i < 14; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const distance = 8 + Math.random() * 25;
+  createTree(Math.cos(angle) * distance, Math.sin(angle) * distance);
+}
+createBuilding(-8, -6, 4, 3.5, 4, 0x8a7a6a);
+createBuilding(9, -4, 5, 4.5, 3, 0x9a8a7a);
+createBuilding(0, -14, 6, 5, 5, 0x7a6a5a);
 
-  const corpo = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 16, 16),
-    new THREE.MeshStandardMaterial({ color: coloreVeste })
-  );
-  corpo.position.y = 0.9;
-  gruppo.add(corpo);
+// ============================================================
+// MODELLO DEL MAGO: sfera (corpo) + cono (cappello)
+// ============================================================
+function createWizard(color) {
+  const group = new THREE.Group();
 
-  const cappello = new THREE.Mesh(
+  const bodyMaterial = new THREE.MeshStandardMaterial({ color, emissive: 0x000000, emissiveIntensity: 0 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), bodyMaterial);
+  body.position.y = BODY_HEIGHT;
+  group.add(body);
+
+  const hat = new THREE.Mesh(
     new THREE.ConeGeometry(0.35, 0.7, 16),
     new THREE.MeshStandardMaterial({ color: 0x1a1a2e })
   );
-  cappello.position.y = 1.55;
-  gruppo.add(cappello);
+  hat.position.y = BODY_HEIGHT + 0.65;
+  group.add(hat);
 
-  gruppo.position.set(x, 0, z);
-  scene.add(gruppo);
-  ostacoli.push({ x, z, raggio: 0.5 });
-  return gruppo;
+  scene.add(group);
+  return { group, bodyMaterial };
 }
 
-// Popoliamo la mappa
-for (let i = 0; i < 14; i++) {
-  const angolo = Math.random() * Math.PI * 2;
-  const distanza = 6 + Math.random() * 25;
-  creaAlbero(Math.cos(angolo) * distanza, Math.sin(angolo) * distanza);
+// Ancora invisibile per il giocatore locale: la camera E' la sua testa, quindi
+// non ha un modello visibile, ma gli effetti dei suoi incantesimi devono
+// comunque partire da un punto preciso nello spazio 3D.
+const localAnchor = new THREE.Object3D();
+scene.add(localAnchor);
+
+// slot (int) -> { group, bodyMaterial, targetX, targetZ, targetYaw }
+const remotePlayers = {};
+let mySlot = null;
+
+function addRemotePlayer(slot, x, z, yaw) {
+  if (remotePlayers[slot]) return; // gia' presente, evita duplicati
+  const color = 0x4040ff + slot * 0x203040; // colore diverso per ogni slot, giusto per distinguerli
+  const { group, bodyMaterial } = createWizard(color);
+  group.position.set(x, 0, z);
+  group.rotation.y = yaw;
+  remotePlayers[slot] = { group, bodyMaterial, targetX: x, targetZ: z, targetYaw: yaw };
 }
-creaEdificio(-8, -6, 4, 3.5, 4, 0x8a7a6a);
-creaEdificio(9, -4, 5, 4.5, 3, 0x9a8a7a);
-creaEdificio(0, -14, 6, 5, 5, 0x7a6a5a);
-creaMago(4, 3, 0x6b3fa0);
-creaMago(-5, 6, 0x2f6fa0);
+
+function removeRemotePlayer(slot) {
+  const player = remotePlayers[slot];
+  if (!player) return;
+  scene.remove(player.group);
+  delete remotePlayers[slot];
+}
+
+function updateRemotePlayer(slot, x, z, yaw) {
+  const player = remotePlayers[slot];
+  if (!player) return;
+  player.targetX = x;
+  player.targetZ = z;
+  player.targetYaw = yaw;
+}
 
 // ============================================================
-// CONTROLLI IN PRIMA PERSONA
+// EFFETTI DEGLI INCANTESIMI
+// Prendono in input l'oggetto Object3D di origine (localAnchor oppure il
+// group di un giocatore remoto) e ne leggono la posizione nel mondo.
+// ============================================================
+let activeParticles = [];
+const worldPosition = new THREE.Vector3();
+
+function spawnParticles(color, count, origin) {
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const velocities = [];
+  for (let i = 0; i < count; i++) {
+    positions[i * 3 + 0] = origin.x;
+    positions[i * 3 + 1] = origin.y;
+    positions[i * 3 + 2] = origin.z;
+    velocities.push(new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 2 + 0.5, (Math.random() - 0.5) * 2));
+  }
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({ color, size: 0.06, transparent: true, opacity: 1 });
+  const points = new THREE.Points(geometry, material);
+  scene.add(points);
+  activeParticles.push({ points, velocities, born: performance.now(), lifetime: 900 });
+}
+
+function getBodyMaterial(anchor) {
+  // il giocatore locale non ha un corpo visibile: niente materiale da far lampeggiare
+  return anchor === localAnchor ? null : anchor.userData.bodyMaterial;
+}
+
+function castLightning(anchor) {
+  anchor.getWorldPosition(worldPosition);
+  const material = getBodyMaterial(anchor);
+  if (material) { material.emissive.set(SPELL_COLORS.fulmine); material.emissiveIntensity = 2.2; }
+
+  const boltPoints = [];
+  let x = worldPosition.x, y = worldPosition.y + 3.4;
+  while (y > worldPosition.y) {
+    boltPoints.push(new THREE.Vector3(x, y, worldPosition.z));
+    x += (Math.random() - 0.5) * 0.5;
+    y -= 0.4;
+  }
+  const bolt = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(boltPoints),
+    new THREE.LineBasicMaterial({ color: SPELL_COLORS.fulmine })
+  );
+  scene.add(bolt);
+  setTimeout(() => scene.remove(bolt), 150);
+
+  spawnParticles(SPELL_COLORS.fulmine, 30, worldPosition);
+}
+
+function castShield(anchor) {
+  // lo scudo e' figlio dell'ancora: segue automaticamente il giocatore senza
+  // bisogno di aggiornare la posizione a mano ad ogni frame
+  if (anchor.userData.shieldMesh) anchor.remove(anchor.userData.shieldMesh);
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.9, 32, 32),
+    new THREE.MeshBasicMaterial({ color: SPELL_COLORS.scudo, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
+  );
+  mesh.position.y = BODY_HEIGHT;
+  mesh.scale.setScalar(0.01);
+  mesh.userData.born = performance.now();
+  anchor.add(mesh);
+  anchor.userData.shieldMesh = mesh;
+}
+
+function castFire(anchor) {
+  anchor.getWorldPosition(worldPosition);
+  const material = getBodyMaterial(anchor);
+  if (material) { material.emissive.set(SPELL_COLORS.fuoco); material.emissiveIntensity = 1.6; }
+  spawnParticles(SPELL_COLORS.fuoco, 45, worldPosition);
+}
+
+const SPELL_EFFECTS = { fulmine: castLightning, scudo: castShield, fuoco: castFire };
+
+function getEffectAnchor(slot) {
+  if (slot === mySlot) return localAnchor;
+  const player = remotePlayers[slot];
+  return player ? player.group : null;
+}
+
+// colleghiamo bodyMaterial ai group remoti tramite userData, cosi'
+// getBodyMaterial() puo' leggerlo senza bisogno di mappe separate
+function attachBodyMaterial(slot) {
+  const player = remotePlayers[slot];
+  if (player) player.group.userData.bodyMaterial = player.bodyMaterial;
+}
+
+// ============================================================
+// HUD: cooldown SOLO del proprio giocatore
+// ============================================================
+const lastLocalCast = { fulmine: 0, scudo: 0, fuoco: 0 };
+const cooldownBars = {};
+document.querySelectorAll(".fill").forEach(el => cooldownBars[el.dataset.spell] = el);
+
+function updateCooldownBars() {
+  const now = performance.now();
+  for (const name in cooldownBars) {
+    const fraction = Math.min((now - lastLocalCast[name]) / COOLDOWN_MS, 1);
+    cooldownBars[name].style.transform = `scaleX(${fraction})`;
+  }
+}
+
+// ============================================================
+// CONTROLLI IN PRIMA PERSONA E COLLISIONI
 // ============================================================
 const controls = new THREE.PointerLockControls(camera, document.body);
-const istruzioni = document.getElementById("istruzioni");
-const mirino = document.getElementById("mirino");
+const overlay = document.getElementById("overlay");
+const crosshair = document.getElementById("crosshair");
+const hud = document.getElementById("hud");
 
-istruzioni.addEventListener("click", () => controls.lock());
-controls.addEventListener("lock", () => { istruzioni.style.display = "none"; mirino.style.display = "block"; });
-controls.addEventListener("unlock", () => { istruzioni.style.display = "flex"; mirino.style.display = "none"; });
+controls.addEventListener("lock", () => { overlay.style.display = "none"; crosshair.style.display = "block"; });
+controls.addEventListener("unlock", () => { overlay.style.display = "flex"; crosshair.style.display = "none"; });
 
-const tasti = { avanti: false, indietro: false, sinistra: false, destra: false };
-document.addEventListener("keydown", (e) => impostaTasto(e.code, true));
-document.addEventListener("keyup", (e) => impostaTasto(e.code, false));
+const keys = { forward: false, backward: false, left: false, right: false };
+document.addEventListener("keydown", (e) => setKey(e.code, true));
+document.addEventListener("keyup", (e) => setKey(e.code, false));
 
-function impostaTasto(codice, valore) {
-  if (codice === "KeyW") tasti.avanti = valore;
-  if (codice === "KeyS") tasti.indietro = valore;
-  if (codice === "KeyA") tasti.sinistra = valore;
-  if (codice === "KeyD") tasti.destra = valore;
+function setKey(code, value) {
+  if (code === "KeyW") keys.forward = value;
+  if (code === "KeyS") keys.backward = value;
+  if (code === "KeyA") keys.left = value;
+  if (code === "KeyD") keys.right = value;
 }
 
-const VELOCITA = 4.0; // metri al secondo
-const RAGGIO_GIOCATORE = 0.35;
-
-function aggiornaMovimento(delta) {
-  if (!controls.isLocked) return;
-
-  // direzione desiderata in spazio LOCALE (rispetto a dove guardi):
-  // z negativo = avanti, x positivo = destra. PointerLockControls la
-  // converte automaticamente in spazio mondo tenendo conto della rotazione.
-  let dx = 0, dz = 0;
-  if (tasti.avanti) dz -= 1;
-  if (tasti.indietro) dz += 1;
-  if (tasti.sinistra) dx -= 1;
-  if (tasti.destra) dx += 1;
-
-  if (dx !== 0 || dz !== 0) {
-    const lunghezza = Math.hypot(dx, dz);
-    dx /= lunghezza; dz /= lunghezza; // normalizza: diagonale non più veloce
-
-    const spostamento = VELOCITA * delta;
-    const posizionePrima = camera.position.clone();
-
-    controls.moveRight(dx * spostamento);
-    controls.moveForward(-dz * spostamento);
-
-    risolviCollisioni(posizionePrima);
-  }
-}
-
-function risolviCollisioni(posizionePrima) {
-  for (const o of ostacoli) {
+function resolveCollisions() {
+  for (const o of obstacles) {
     const dx = camera.position.x - o.x;
     const dz = camera.position.z - o.z;
-    const distanza = Math.hypot(dx, dz);
-    const minima = o.raggio + RAGGIO_GIOCATORE;
-    if (distanza < minima && distanza > 0.0001) {
-      // spingi il giocatore fuori dall'ostacolo, lungo la direzione che lo allontana
-      const fattore = minima / distanza;
-      camera.position.x = o.x + dx * fattore;
-      camera.position.z = o.z + dz * fattore;
+    const distance = Math.hypot(dx, dz);
+    const minDistance = o.radius + PLAYER_RADIUS;
+    if (distance < minDistance && distance > 0.0001) {
+      const factor = minDistance / distance;
+      camera.position.x = o.x + dx * factor;
+      camera.position.z = o.z + dz * factor;
     }
   }
-  // non farti mai scendere sotto l'altezza occhi (niente salti/gravità per ora)
-  camera.position.y = 1.7;
+  camera.position.y = EYE_HEIGHT;
 }
+
+function updateMovement(delta) {
+  if (!controls.isLocked) return;
+
+  let dx = 0, dz = 0;
+  if (keys.forward) dz -= 1;
+  if (keys.backward) dz += 1;
+  if (keys.left) dx -= 1;
+  if (keys.right) dx += 1;
+
+  if (dx !== 0 || dz !== 0) {
+    const length = Math.hypot(dx, dz);
+    dx /= length; dz /= length;
+    const step = MOVE_SPEED * delta;
+    controls.moveRight(dx * step);
+    controls.moveForward(-dz * step);
+    resolveCollisions();
+  }
+}
+
+// ============================================================
+// RETE
+// ============================================================
+let socket, audioContext, workletNode, micStream;
+let lastPositionSentAt = 0;
+
+async function connectToServer() {
+  socket = new WebSocket(WS_URL);
+  socket.binaryType = "arraybuffer";
+
+  socket.onopen = () => { hud.textContent = "Connesso al server..."; };
+
+  socket.onmessage = async (event) => {
+    const message = JSON.parse(event.data);
+
+    if (message.type === "full") {
+      hud.textContent = "Server pieno (5 giocatori).";
+      socket.close();
+      return;
+    }
+
+    if (message.type === "welcome") {
+      mySlot = message.your_slot;
+      camera.position.set(message.spawn_x, EYE_HEIGHT, message.spawn_z);
+      for (const p of message.players) {
+        addRemotePlayer(p.slot, p.x, p.z, p.yaw);
+        attachBodyMaterial(p.slot);
+      }
+      hud.textContent = `Slot ${mySlot + 1} - richiedo il microfono...`;
+      await startMicrophone();
+      hud.textContent = `Slot ${mySlot + 1} - in ascolto`;
+      return;
+    }
+
+    if (message.type === "player_connected") {
+      addRemotePlayer(message.slot, message.x, message.z, message.yaw);
+      attachBodyMaterial(message.slot);
+      return;
+    }
+
+    if (message.type === "player_disconnected") { removeRemotePlayer(message.slot); return; }
+
+    if (message.type === "player_position") {
+      updateRemotePlayer(message.slot, message.x, message.z, message.yaw);
+      return;
+    }
+
+    if (message.type === "spell") {
+      const anchor = getEffectAnchor(message.slot);
+      const effect = SPELL_EFFECTS[message.word];
+      if (anchor && effect) effect(anchor);
+      if (message.slot === mySlot) lastLocalCast[message.word] = performance.now();
+      return;
+    }
+  };
+
+  socket.onclose = () => { hud.textContent = "Disconnesso."; socket = null; };
+  socket.onerror = (e) => { console.error(e); hud.textContent = "Errore di connessione."; };
+}
+
+async function startMicrophone() {
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  audioContext = new AudioContext();
+  await audioContext.audioWorklet.addModule("pcm-processor.js");
+  const source = audioContext.createMediaStreamSource(micStream);
+  workletNode = new AudioWorkletNode(audioContext, "pcm-processor", {
+    processorOptions: { targetSampleRate: 16000, inputSampleRate: audioContext.sampleRate }
+  });
+  workletNode.port.onmessage = (event) => {
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(event.data);
+  };
+  source.connect(workletNode);
+}
+
+function sendPositionIfDue() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  const now = performance.now();
+  if (now - lastPositionSentAt < POSITION_SEND_INTERVAL_MS) return;
+  lastPositionSentAt = now;
+  // lo yaw (rotazione orizzontale) si legge dalla rotazione Y dell'oggetto camera
+  socket.send(JSON.stringify({
+    type: "position",
+    x: camera.position.x,
+    z: camera.position.z,
+    yaw: camera.rotation.y,
+  }));
+}
+
+overlay.addEventListener("click", async () => {
+  if (!socket) await connectToServer();
+  controls.lock();
+});
 
 // ============================================================
 // LOOP
 // ============================================================
-let ultimoTempo = performance.now();
-function anima() {
-  requestAnimationFrame(anima);
-  const ora = performance.now();
-  const delta = Math.min((ora - ultimoTempo) / 1000, 0.1); // clamp: evita salti se la tab perde il focus
-  ultimoTempo = ora;
+let lastFrameTime = performance.now();
 
-  aggiornaMovimento(delta);
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const delta = Math.min((now - lastFrameTime) / 1000, 0.1);
+  lastFrameTime = now;
+
+  updateMovement(delta);
+  sendPositionIfDue();
+
+  // ancora locale: segue la camera, ma un po' piu' in basso (altezza corpo, non occhi)
+  localAnchor.position.set(camera.position.x, BODY_HEIGHT, camera.position.z);
+
+  for (const slot in remotePlayers) {
+    const player = remotePlayers[slot];
+    player.group.position.x += (player.targetX - player.group.position.x) * REMOTE_LERP_FACTOR;
+    player.group.position.z += (player.targetZ - player.group.position.z) * REMOTE_LERP_FACTOR;
+    player.group.rotation.y += (player.targetYaw - player.group.rotation.y) * REMOTE_LERP_FACTOR;
+
+    player.bodyMaterial.emissiveIntensity += (0 - player.bodyMaterial.emissiveIntensity) * 0.04;
+
+    const shield = player.group.userData.shieldMesh;
+    if (shield) updateShield(shield);
+  }
+  updateShield(localAnchor.userData.shieldMesh);
+
+  activeParticles = activeParticles.filter(p => {
+    const age = now - p.born;
+    if (age > p.lifetime) { scene.remove(p.points); return false; }
+    const positions = p.points.geometry.attributes.position;
+    for (let i = 0; i < p.velocities.length; i++) {
+      positions.array[i * 3 + 0] += p.velocities[i].x * 0.016;
+      positions.array[i * 3 + 1] += p.velocities[i].y * 0.016;
+      positions.array[i * 3 + 2] += p.velocities[i].z * 0.016;
+      p.velocities[i].y -= 0.03;
+    }
+    positions.needsUpdate = true;
+    p.points.material.opacity = 1 - age / p.lifetime;
+    return true;
+  });
+
+  updateCooldownBars();
   renderer.render(scene, camera);
 }
-anima();
+
+function updateShield(shield) {
+  if (!shield) return;
+  const age = performance.now() - shield.userData.born;
+  shield.scale.setScalar(Math.min(age / 250, 1));
+  shield.material.opacity = 0.22 * Math.max(0, 1 - Math.max(0, age - 1800) / 600);
+  if (age > 2400) {
+    const parent = shield.parent;
+    parent.remove(shield);
+    parent.userData.shieldMesh = null;
+  }
+}
+
+animate();
 </script>
 </body>
 </html>
