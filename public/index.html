@@ -2,114 +2,40 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<title>Fase 4 - L'Arena dei Nuclei</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
+<title>Prototipo: Mappa in Prima Persona</title>
 <style>
-  :root {
-    --bg: #0b0e1a;
-    --ink: #cbd3e6;
-    --ink-dim: #6b7396;
-    --fulmine: #a3d5ff;
-    --scudo: #4fd1c5;
-    --fuoco: #ff6b35;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
-  body { font-family: system-ui, sans-serif; color: var(--ink); }
+  html, body { margin: 0; height: 100%; background: #87ceeb; overflow: hidden; }
   canvas#scene { position: fixed; inset: 0; display: block; }
-
-  #hud {
-    position: fixed; top: 24px; left: 24px; right: 24px;
-    display: flex; justify-content: space-between; align-items: flex-start;
-    pointer-events: none;
+  #istruzioni {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55); color: #fff; font-family: system-ui, sans-serif;
+    text-align: center; cursor: pointer; z-index: 10;
   }
-  #titolo {
-    font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.4rem;
-    letter-spacing: 0.06em; color: var(--ink);
-    text-shadow: 0 0 18px rgba(163, 213, 255, 0.35);
+  #istruzioni h2 { margin-bottom: 8px; }
+  #istruzioni p { color: #ccc; font-size: 0.9rem; }
+  #mirino {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 6px; height: 6px; border-radius: 50%; background: #fff;
+    box-shadow: 0 0 4px rgba(0,0,0,0.6); pointer-events: none;
   }
-  #stato { font-size: 0.8rem; color: var(--ink-dim); margin-top: 4px; letter-spacing: 0.03em; }
-  #btnConnetti {
-    pointer-events: auto;
-    background: transparent; color: var(--ink);
-    border: 1px solid var(--ink-dim); border-radius: 999px;
-    padding: 10px 20px; font-size: 0.85rem; letter-spacing: 0.04em;
-    cursor: pointer; transition: border-color 0.2s, color 0.2s;
-  }
-  #btnConnetti:hover { border-color: var(--ink); }
-  #btnConnetti:disabled { opacity: 0.4; cursor: default; }
-
-  #incantesimi {
-    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 28px;
-  }
-  .incantesimo { font-family: 'Cinzel', serif; text-align: center; width: 92px; }
-  .incantesimo .nome { font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
-  .incantesimo .barra {
-    margin-top: 8px; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden;
-  }
-  .incantesimo .barra .riempi { height: 100%; width: 100%; transform-origin: left; transition: transform 0.05s linear; }
-  .fulmine .nome { color: var(--fulmine); }
-  .fulmine .riempi { background: var(--fulmine); box-shadow: 0 0 8px var(--fulmine); }
-  .scudo .nome { color: var(--scudo); }
-  .scudo .riempi { background: var(--scudo); box-shadow: 0 0 8px var(--scudo); }
-  .fuoco .nome { color: var(--fuoco); }
-  .fuoco .riempi { background: var(--fuoco); box-shadow: 0 0 8px var(--fuoco); }
-
-  .etichetta {
-    position: fixed; transform: translate(-50%, -100%);
-    font-family: 'Cinzel', serif; font-size: 0.72rem; letter-spacing: 0.05em;
-    color: var(--ink-dim); text-transform: uppercase; pointer-events: none;
-    text-shadow: 0 0 6px rgba(0,0,0,0.8);
-    white-space: nowrap;
-  }
-  .etichetta.tu { color: #fff; }
 </style>
 </head>
 <body>
 
 <canvas id="scene"></canvas>
-
-<div id="hud">
+<div id="mirino"></div>
+<div id="istruzioni">
   <div>
-    <div id="titolo">L'Arena dei Nuclei</div>
-    <div id="stato">Non connesso</div>
-  </div>
-  <button id="btnConnetti">Connetti microfono</button>
-</div>
-
-<div id="incantesimi">
-  <div class="incantesimo fulmine">
-    <div class="nome">Fulmine</div>
-    <div class="barra"><div class="riempi" data-spell="fulmine"></div></div>
-  </div>
-  <div class="incantesimo scudo">
-    <div class="nome">Scudo</div>
-    <div class="barra"><div class="riempi" data-spell="scudo"></div></div>
-  </div>
-  <div class="incantesimo fuoco">
-    <div class="nome">Fuoco</div>
-    <div class="barra"><div class="riempi" data-spell="fuoco"></div></div>
+    <h2>Clicca per entrare</h2>
+    <p>WASD per muoverti, mouse per guardarti intorno, ESC per uscire</p>
   </div>
 </div>
-
-<div id="etichette"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
 <script>
 // ============================================================
-// CONFIGURAZIONE
-// ============================================================
-const WS_URL = "wss://192.168.1.170:8765";
-const COOLDOWN_MS = 1800;       // deve combaciare con COOLDOWN_MS nel server
-const SLOT_MASSIMI = 5;
-const RAGGIO_ARENA = 3.2;
-
-const COLORI = { fulmine: 0xa3d5ff, scudo: 0x4fd1c5, fuoco: 0xff6b35 };
-
-// ============================================================
-// SCENA THREE.JS
+// SCENA BASE
 // ============================================================
 const canvas = document.getElementById("scene");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -117,12 +43,11 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x0b0e1a, 0.035);
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 15, 55);
 
-// Camera d'arena: vista dall'alto ad angolo, per abbracciare tutti gli slot
-const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
-camera.position.set(0, 8.5, 7.5);
-camera.lookAt(0, 0, 0);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 1.7, 5); // 1.7 = altezza occhi approssimativa di una persona
 
 window.addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
@@ -130,269 +55,181 @@ window.addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-const pavimento = new THREE.Mesh(
-  new THREE.CircleGeometry(RAGGIO_ARENA + 1.5, 64),
-  new THREE.MeshStandardMaterial({ color: 0x11152a, roughness: 0.6, metalness: 0.2 })
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445533, 1.1));
+const sole = new THREE.DirectionalLight(0xfff4e0, 1.2);
+sole.position.set(10, 20, 8);
+scene.add(sole);
+
+// Terreno
+const terreno = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 80),
+  new THREE.MeshStandardMaterial({ color: 0x3d6b3d })
 );
-pavimento.rotation.x = -Math.PI / 2;
-scene.add(pavimento);
-
-scene.add(new THREE.AmbientLight(0x404060, 0.8));
+terreno.rotation.x = -Math.PI / 2;
+scene.add(terreno);
 
 // ============================================================
-// POSIZIONAMENTO SLOT: server e client concordano sulla stessa
-// formula, quindi basta trasmettere l'indice dello slot.
+// OSTACOLI: lista di { x, z, raggio } usata sia per posizionare
+// gli oggetti sia per le collisioni (li trattiamo come cilindri
+// visti dall'alto, ignorando l'altezza).
 // ============================================================
-function posizioneSlot(slot) {
-  const angolo = (slot / SLOT_MASSIMI) * Math.PI * 2;
-  return new THREE.Vector3(Math.sin(angolo) * RAGGIO_ARENA, 0.6, Math.cos(angolo) * RAGGIO_ARENA);
-}
+const ostacoli = [];
 
-// ============================================================
-// GESTIONE NUCLEI (uno per giocatore connesso)
-// ============================================================
-const nuclei = {}; // slot -> { mesh, guscio, luce, mat, etichettaEl, scudoMesh }
-let mioSlot = null;
+function creaAlbero(x, z) {
+  const gruppo = new THREE.Group();
 
-function creaNucleo(slot) {
-  const pos = posizioneSlot(slot);
-
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x2a3050, emissive: 0x3a4a8a, emissiveIntensity: 0.6,
-    roughness: 0.3, metalness: 0.4, flatShading: true,
-  });
-  const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 1), mat);
-  mesh.position.copy(pos);
-  scene.add(mesh);
-
-  const guscio = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.62, 1),
-    new THREE.MeshBasicMaterial({ color: 0x8a9cff, wireframe: true, transparent: true, opacity: 0.25 })
+  const tronco = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.15, 0.2, 1.4, 8),
+    new THREE.MeshStandardMaterial({ color: 0x5a3d2b })
   );
-  guscio.position.copy(pos);
-  scene.add(guscio);
+  tronco.position.y = 0.7;
+  gruppo.add(tronco);
 
-  const luce = new THREE.PointLight(0xffffff, 1.6, 5);
-  luce.position.copy(pos);
-  scene.add(luce);
-
-  const etichettaEl = document.createElement("div");
-  etichettaEl.className = "etichetta" + (slot === mioSlot ? " tu" : "");
-  etichettaEl.textContent = slot === mioSlot ? "Tu" : `Giocatore ${slot + 1}`;
-  document.getElementById("etichette").appendChild(etichettaEl);
-
-  nuclei[slot] = { mesh, guscio, luce, mat, etichettaEl, scudoMesh: null, pos };
-}
-
-function rimuoviNucleo(slot) {
-  const n = nuclei[slot];
-  if (!n) return;
-  scene.remove(n.mesh, n.guscio, n.luce);
-  if (n.scudoMesh) scene.remove(n.scudoMesh);
-  n.etichettaEl.remove();
-  delete nuclei[slot];
-}
-
-// ============================================================
-// EFFETTI (ora parametrizzati per slot bersaglio)
-// ============================================================
-let particelleAttive = [];
-
-function creaParticelle(colore, numero, origine) {
-  const geom = new THREE.BufferGeometry();
-  const posizioni = new Float32Array(numero * 3);
-  const velocita = [];
-  for (let i = 0; i < numero; i++) {
-    posizioni[i * 3 + 0] = origine.x;
-    posizioni[i * 3 + 1] = origine.y;
-    posizioni[i * 3 + 2] = origine.z;
-    velocita.push(new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 2 + 0.5, (Math.random() - 0.5) * 2));
-  }
-  geom.setAttribute("position", new THREE.BufferAttribute(posizioni, 3));
-  const mat = new THREE.PointsMaterial({ color: colore, size: 0.06, transparent: true, opacity: 1 });
-  const punti = new THREE.Points(geom, mat);
-  scene.add(punti);
-  return { punti, velocita, nato: performance.now(), vita: 900 };
-}
-
-function effettoFulmine(slot) {
-  const n = nuclei[slot];
-  if (!n) return;
-  n.luce.color.set(0xffffff);
-  n.luce.intensity = 5;
-  n.mat.emissive.set(COLORI.fulmine);
-  n.mat.emissiveIntensity = 2.2;
-
-  const puntiBolt = [];
-  let x = n.pos.x, y = n.pos.y + 3.4;
-  while (y > n.pos.y) {
-    puntiBolt.push(new THREE.Vector3(x, y, n.pos.z));
-    x += (Math.random() - 0.5) * 0.5;
-    y -= 0.4;
-  }
-  const bolt = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(puntiBolt),
-    new THREE.LineBasicMaterial({ color: COLORI.fulmine })
+  const chioma = new THREE.Mesh(
+    new THREE.ConeGeometry(1.1, 2.2, 8),
+    new THREE.MeshStandardMaterial({ color: 0x2e5c2e })
   );
-  scene.add(bolt);
-  setTimeout(() => scene.remove(bolt), 150);
+  chioma.position.y = 2.2;
+  gruppo.add(chioma);
 
-  particelleAttive.push(creaParticelle(COLORI.fulmine, 30, n.pos));
+  gruppo.position.set(x, 0, z);
+  scene.add(gruppo);
+  ostacoli.push({ x, z, raggio: 0.6 }); // raggio di collisione, un po' più stretto della chioma
 }
 
-function effettoScudo(slot) {
-  const n = nuclei[slot];
-  if (!n) return;
-  if (n.scudoMesh) scene.remove(n.scudoMesh);
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.9, 32, 32),
-    new THREE.MeshBasicMaterial({ color: COLORI.scudo, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
+function creaEdificio(x, z, largo, alto, profondo, colore) {
+  const edificio = new THREE.Mesh(
+    new THREE.BoxGeometry(largo, alto, profondo),
+    new THREE.MeshStandardMaterial({ color: colore })
   );
-  mesh.position.copy(n.pos);
-  mesh.scale.setScalar(0.01);
-  mesh.userData.nato = performance.now();
-  scene.add(mesh);
-  n.scudoMesh = mesh;
+  edificio.position.set(x, alto / 2, z);
+  scene.add(edificio);
+  // approssimiamo il rettangolo con un cerchio di collisione: raggio = metà diagonale
+  const raggio = Math.sqrt(largo * largo + profondo * profondo) / 2;
+  ostacoli.push({ x, z, raggio });
 }
 
-function effettoFuoco(slot) {
-  const n = nuclei[slot];
-  if (!n) return;
-  n.mat.emissive.set(COLORI.fuoco);
-  n.mat.emissiveIntensity = 1.6;
-  particelleAttive.push(creaParticelle(COLORI.fuoco, 45, n.pos));
+// Il modello del mago: sfera (corpo) + cono (cappello). Riutilizzabile per
+// ogni giocatore che vedremo quando colleghiamo il multiplayer — il TUO
+// mago in prima persona non si vede mai (la camera È la sua testa), ma gli
+// altri giocatori li vedrai così.
+function creaMago(x, z, coloreVeste) {
+  const gruppo = new THREE.Group();
+
+  const corpo = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 16, 16),
+    new THREE.MeshStandardMaterial({ color: coloreVeste })
+  );
+  corpo.position.y = 0.9;
+  gruppo.add(corpo);
+
+  const cappello = new THREE.Mesh(
+    new THREE.ConeGeometry(0.35, 0.7, 16),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a2e })
+  );
+  cappello.position.y = 1.55;
+  gruppo.add(cappello);
+
+  gruppo.position.set(x, 0, z);
+  scene.add(gruppo);
+  ostacoli.push({ x, z, raggio: 0.5 });
+  return gruppo;
 }
 
-const EFFETTI = { fulmine: effettoFulmine, scudo: effettoScudo, fuoco: effettoFuoco };
+// Popoliamo la mappa
+for (let i = 0; i < 14; i++) {
+  const angolo = Math.random() * Math.PI * 2;
+  const distanza = 6 + Math.random() * 25;
+  creaAlbero(Math.cos(angolo) * distanza, Math.sin(angolo) * distanza);
+}
+creaEdificio(-8, -6, 4, 3.5, 4, 0x8a7a6a);
+creaEdificio(9, -4, 5, 4.5, 3, 0x9a8a7a);
+creaEdificio(0, -14, 6, 5, 5, 0x7a6a5a);
+creaMago(4, 3, 0x6b3fa0);
+creaMago(-5, 6, 0x2f6fa0);
 
 // ============================================================
-// HUD: cooldown SOLO del proprio giocatore
+// CONTROLLI IN PRIMA PERSONA
 // ============================================================
-const ultimoLancioLocale = { fulmine: 0, scudo: 0, fuoco: 0 };
-const barre = {};
-document.querySelectorAll(".riempi").forEach(el => barre[el.dataset.spell] = el);
+const controls = new THREE.PointerLockControls(camera, document.body);
+const istruzioni = document.getElementById("istruzioni");
+const mirino = document.getElementById("mirino");
 
-function aggiornaBarreCooldown() {
-  const ora = performance.now();
-  for (const nome in barre) {
-    const frazione = Math.min((ora - ultimoLancioLocale[nome]) / COOLDOWN_MS, 1);
-    barre[nome].style.transform = `scaleX(${frazione})`;
+istruzioni.addEventListener("click", () => controls.lock());
+controls.addEventListener("lock", () => { istruzioni.style.display = "none"; mirino.style.display = "block"; });
+controls.addEventListener("unlock", () => { istruzioni.style.display = "flex"; mirino.style.display = "none"; });
+
+const tasti = { avanti: false, indietro: false, sinistra: false, destra: false };
+document.addEventListener("keydown", (e) => impostaTasto(e.code, true));
+document.addEventListener("keyup", (e) => impostaTasto(e.code, false));
+
+function impostaTasto(codice, valore) {
+  if (codice === "KeyW") tasti.avanti = valore;
+  if (codice === "KeyS") tasti.indietro = valore;
+  if (codice === "KeyA") tasti.sinistra = valore;
+  if (codice === "KeyD") tasti.destra = valore;
+}
+
+const VELOCITA = 4.0; // metri al secondo
+const RAGGIO_GIOCATORE = 0.35;
+
+function aggiornaMovimento(delta) {
+  if (!controls.isLocked) return;
+
+  // direzione desiderata in spazio LOCALE (rispetto a dove guardi):
+  // z negativo = avanti, x positivo = destra. PointerLockControls la
+  // converte automaticamente in spazio mondo tenendo conto della rotazione.
+  let dx = 0, dz = 0;
+  if (tasti.avanti) dz -= 1;
+  if (tasti.indietro) dz += 1;
+  if (tasti.sinistra) dx -= 1;
+  if (tasti.destra) dx += 1;
+
+  if (dx !== 0 || dz !== 0) {
+    const lunghezza = Math.hypot(dx, dz);
+    dx /= lunghezza; dz /= lunghezza; // normalizza: diagonale non più veloce
+
+    const spostamento = VELOCITA * delta;
+    const posizionePrima = camera.position.clone();
+
+    controls.moveRight(dx * spostamento);
+    controls.moveForward(-dz * spostamento);
+
+    risolviCollisioni(posizionePrima);
   }
 }
 
-// ============================================================
-// LOOP DI ANIMAZIONE
-// ============================================================
-const proiettore = new THREE.Vector3();
+function risolviCollisioni(posizionePrima) {
+  for (const o of ostacoli) {
+    const dx = camera.position.x - o.x;
+    const dz = camera.position.z - o.z;
+    const distanza = Math.hypot(dx, dz);
+    const minima = o.raggio + RAGGIO_GIOCATORE;
+    if (distanza < minima && distanza > 0.0001) {
+      // spingi il giocatore fuori dall'ostacolo, lungo la direzione che lo allontana
+      const fattore = minima / distanza;
+      camera.position.x = o.x + dx * fattore;
+      camera.position.z = o.z + dz * fattore;
+    }
+  }
+  // non farti mai scendere sotto l'altezza occhi (niente salti/gravità per ora)
+  camera.position.y = 1.7;
+}
 
+// ============================================================
+// LOOP
+// ============================================================
+let ultimoTempo = performance.now();
 function anima() {
   requestAnimationFrame(anima);
-  const t = performance.now() * 0.001;
+  const ora = performance.now();
+  const delta = Math.min((ora - ultimoTempo) / 1000, 0.1); // clamp: evita salti se la tab perde il focus
+  ultimoTempo = ora;
 
-  for (const slot in nuclei) {
-    const n = nuclei[slot];
-    n.mesh.rotation.y = t * 0.3 + slot;
-    n.mesh.rotation.x = Math.sin(t * 0.4 + slot) * 0.1;
-    n.guscio.rotation.y = -t * 0.15;
-    n.luce.intensity += (1.6 - n.luce.intensity) * 0.05;
-    n.mat.emissiveIntensity += (0.6 - n.mat.emissiveIntensity) * 0.04;
-
-    if (n.scudoMesh) {
-      const eta = performance.now() - n.scudoMesh.userData.nato;
-      n.scudoMesh.scale.setScalar(Math.min(eta / 250, 1));
-      n.scudoMesh.material.opacity = 0.22 * Math.max(0, 1 - Math.max(0, eta - 1800) / 600);
-      if (eta > 2400) { scene.remove(n.scudoMesh); n.scudoMesh = null; }
-    }
-
-    // proietta la posizione 3D del nucleo sullo schermo per l'etichetta HTML
-    proiettore.copy(n.pos).project(camera);
-    n.etichettaEl.style.left = `${(proiettore.x * 0.5 + 0.5) * innerWidth}px`;
-    n.etichettaEl.style.top = `${(-proiettore.y * 0.5 + 0.5) * innerHeight - 46}px`;
-  }
-
-  particelleAttive = particelleAttive.filter(p => {
-    const eta = performance.now() - p.nato;
-    if (eta > p.vita) { scene.remove(p.punti); return false; }
-    const pos = p.punti.geometry.attributes.position;
-    for (let i = 0; i < p.velocita.length; i++) {
-      pos.array[i * 3 + 0] += p.velocita[i].x * 0.016;
-      pos.array[i * 3 + 1] += p.velocita[i].y * 0.016;
-      pos.array[i * 3 + 2] += p.velocita[i].z * 0.016;
-      p.velocita[i].y -= 0.03;
-    }
-    pos.needsUpdate = true;
-    p.punti.material.opacity = 1 - eta / p.vita;
-    return true;
-  });
-
-  aggiornaBarreCooldown();
+  aggiornaMovimento(delta);
   renderer.render(scene, camera);
 }
 anima();
-
-// ============================================================
-// CONNESSIONE: audio in uscita, stato di gioco in entrata
-// ============================================================
-const btn = document.getElementById("btnConnetti");
-const stato = document.getElementById("stato");
-let ws, audioContext, workletNode, micStream;
-
-btn.addEventListener("click", async () => {
-  if (ws) return;
-  btn.disabled = true;
-  stato.textContent = "Connessione al server...";
-  ws = new WebSocket(WS_URL);
-  ws.binaryType = "arraybuffer";
-
-  ws.onopen = () => { stato.textContent = "Connesso. In attesa di conferma dal server..."; };
-
-  ws.onmessage = async (event) => {
-    const msg = JSON.parse(event.data);
-
-    if (msg.type === "full") {
-      stato.textContent = "Server pieno (5 giocatori). Riprova più tardi.";
-      ws.close();
-      return;
-    }
-
-    if (msg.type === "welcome") {
-      mioSlot = msg.your_slot;
-      creaNucleo(mioSlot);
-      for (const slot of msg.players) creaNucleo(slot);
-      stato.textContent = "Richiedo il microfono...";
-      await avviaMicrofono();
-      stato.textContent = `In ascolto (slot ${mioSlot + 1}). Pronuncia un incantesimo.`;
-      return;
-    }
-
-    if (msg.type === "player_connected") { creaNucleo(msg.slot); return; }
-    if (msg.type === "player_disconnected") { rimuoviNucleo(msg.slot); return; }
-
-    if (msg.type === "spell") {
-      const effetto = EFFETTI[msg.word];
-      if (effetto) effetto(msg.slot);
-      if (msg.slot === mioSlot) ultimoLancioLocale[msg.word] = performance.now();
-      return;
-    }
-  };
-
-  ws.onclose = () => { stato.textContent = "Disconnesso."; ws = null; btn.disabled = false; };
-  ws.onerror = (e) => { console.error(e); stato.textContent = "Errore di connessione."; btn.disabled = false; };
-});
-
-async function avviaMicrofono() {
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  audioContext = new AudioContext();
-  await audioContext.audioWorklet.addModule("pcm-processor.js");
-  const source = audioContext.createMediaStreamSource(micStream);
-  workletNode = new AudioWorkletNode(audioContext, "pcm-processor", {
-    processorOptions: { targetSampleRate: 16000, inputSampleRate: audioContext.sampleRate }
-  });
-  workletNode.port.onmessage = (event) => {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(event.data);
-  };
-  source.connect(workletNode);
-}
 </script>
 </body>
 </html>
