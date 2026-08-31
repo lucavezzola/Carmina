@@ -95,9 +95,9 @@
 // ============================================================
 // CONFIGURAZIONE
 // ============================================================
-const WS_URL = "wss://grace-game-quantitative-buy.trycloudflare.com"; // aggiorna con il tuo IP
+const WS_URL = "wss://dim-replied-surplus-shift.trycloudflare.com"; // aggiorna con il tuo IP
 
-const MOVE_SPEED = 8.0;        // metri al secondo (raddoppiata su tua richiesta)
+const MOVE_SPEED = 3.0;        // metri al secondo (raddoppiata su tua richiesta)
 const ACCELERATION = 20.0;     // metri/secondo^2 quando c'è input
 const FRICTION = 10.0;         // metri/secondo^2 di decelerazione quando non c'è input
 const BODY_HEIGHT = 0.5;       // centro della sfera-corpo = il suo raggio, cosi' il fondo tocca terra
@@ -124,18 +124,13 @@ const damageVignetteEl = document.getElementById("damage-vignette");
 let vignetteFadeTimeout = null;
 
 function flashDamageVignette(damageAmount) {
-  // più danno = flash più intenso, ma non oltre 1
   const intensity = Math.min(1, 0.35 + damageAmount / 100);
   damageVignetteEl.style.transition = "none";
   damageVignetteEl.style.opacity = intensity;
-
-  // forza il browser a "registrare" l'opacità piena prima di far partire il fade,
-  // altrimenti l'assenza di transizione sopra farebbe sparire tutto istantaneamente
   requestAnimationFrame(() => {
     damageVignetteEl.style.transition = "opacity 0.6s ease-out";
     damageVignetteEl.style.opacity = 0;
   });
-
   clearTimeout(vignetteFadeTimeout);
   vignetteFadeTimeout = setTimeout(() => { damageVignetteEl.style.opacity = 0; }, 700);
 }
@@ -145,7 +140,7 @@ function updateHealthBar(hp) {
   const fraction = clamped / MAX_HP;
   healthFillEl.style.height = `${fraction * 100}%`;
   healthLabelEl.textContent = Math.round(clamped);
-  const hue = fraction * 120; // scivola dal verde (120) al rosso (0)
+  const hue = fraction * 120;
   healthFillEl.style.background = `hsl(${hue}, 70%, 45%)`;
 }
 
@@ -161,9 +156,6 @@ scene.fog = new THREE.Fog(0x87ceeb, 15, 55);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 200);
 camera.position.set(0, EYE_HEIGHT, 5);
-// PointerLockControls compone la rotazione con ordine 'YXZ' (prima yaw, poi pitch).
-// Se non allineiamo anche qui l'ordine, leggere camera.rotation.y per la rete
-// restituisce uno yaw "sporcato" dal pitch non appena guardi su o giù.
 camera.rotation.order = "YXZ";
 
 window.addEventListener("resize", () => {
@@ -180,67 +172,184 @@ scene.add(sun);
 const textureLoader = new THREE.TextureLoader();
 const grassTexture = textureLoader.load("https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/terrain/grasslight-big.jpg");
 grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
-grassTexture.repeat.set(5, 5); // ripete la texture invece di stirarla su 80x80 metri
+grassTexture.repeat.set(5, 5);
 
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(80, 80),
-  new THREE.MeshStandardMaterial({ map: grassTexture })
-);
-ground.rotation.x = -Math.PI / 2;
-scene.add(ground);
+let terrainData = null; // { size, resolution, heights }, riempito da buildTerrain()
+
+function buildTerrain(terrain) {
+  terrainData = terrain;
+  const { size, resolution, heights } = terrain;
+
+  const geometry = new THREE.PlaneGeometry(size, size, resolution - 1, resolution - 1);
+  geometry.rotateX(-Math.PI / 2); // orizzontale PRIMA di leggere/scrivere le posizioni
+
+  const positions = geometry.attributes.position;
+  // PlaneGeometry ordina i vertici riga per riga (iz esterno, ix interno):
+  // stesso ordine della nostra griglia heights[iz][ix].
+  for (let iz = 0; iz < resolution; iz++) {
+    for (let ix = 0; ix < resolution; ix++) {
+      positions.setY(iz * resolution + ix, heights[iz][ix]);
+    }
+  }
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({ map: grassTexture });
+  scene.add(new THREE.Mesh(geometry, material));
+}
+
+function terrainHeightAt(x, z) {
+  if (!terrainData) return 0;
+  const { size, resolution, heights } = terrainData;
+  const half = size / 2;
+
+  let gridX = (x + half) / size * (resolution - 1);
+  let gridZ = (z + half) / size * (resolution - 1);
+  gridX = Math.max(0, Math.min(resolution - 1.001, gridX));
+  gridZ = Math.max(0, Math.min(resolution - 1.001, gridZ));
+
+  const x0 = Math.floor(gridX), z0 = Math.floor(gridZ);
+  const x1 = x0 + 1, z1 = z0 + 1;
+  const tx = gridX - x0, tz = gridZ - z0;
+
+  const h00 = heights[z0][x0], h10 = heights[z0][x1];
+  const h01 = heights[z1][x0], h11 = heights[z1][x1];
+  const top = h00 * (1 - tx) + h10 * tx;
+  const bottom = h01 * (1 - tx) + h11 * tx;
+  return top * (1 - tz) + bottom * tz;
+}
 
 // ============================================================
-// OSTACOLI STATICI: alberi come cerchi (il tronco/chioma non e' un
-// pavimento su cui stare), edifici come veri rettangoli (box) su cui
-// SI PUO' camminare sopra se la quota lo permette.
+// OSTACOLI STATICI: alberi come cerchi, edifici come box.
+// La mappa viene costruita quando arriva "world_map" dal server
+// (vedi buildWorldFromServer e connectToServer), non più generata a caso qui.
 // ============================================================
 const obstacles = [];
 
-function createTree(x, z) {
+function ensureObstacleTransform(o) {
+  if (!o) return;
+  if (!o.quaternion) o.quaternion = new THREE.Quaternion();
+  if (!o.invQuaternion) o.invQuaternion = o.quaternion.clone().invert();
+  if (o.x === undefined) o.x = 0;
+  if (o.y === undefined) o.y = 0;
+  if (o.z === undefined) o.z = 0;
+}
+
+function createTree(x, y, z) {
+  const trunk_radius_top = 0.1;
+  const trunk_radius_bottom = 0.2;
+  const trunk_height = 1.4;
   const group = new THREE.Group();
   const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.15, 0.2, 1.4, 8),
+    new THREE.CylinderGeometry(trunk_radius_top, trunk_radius_bottom, trunk_height, 8),
     new THREE.MeshStandardMaterial({ color: 0x5a3d2b })
   );
   trunk.position.y = 0.7;
   group.add(trunk);
+  
+  const cone_radius = 1.1;
+  const cone_height = cone_radius*2;
   const foliage = new THREE.Mesh(
-    new THREE.ConeGeometry(1.1, 2.2, 8),
+    new THREE.ConeGeometry(cone_radius, cone_height, 8),
     new THREE.MeshStandardMaterial({ color: 0x2e5c2e })
   );
-  foliage.position.y = 2.2;
+  foliage.position.y = cone_height;
   group.add(foliage);
-  group.position.set(x, 0, z);
+  group.position.set(x, y, z);
   scene.add(group);
-  obstacles.push({ type: "circle", x, z, radius: 0.6 });
+
+  const quaternion = new THREE.Quaternion();
+  const invQuaternion = quaternion.clone().invert();
+  obstacles.push({
+    type: "cylinder",
+    x, y, z,
+    quaternion, invQuaternion,
+    radius: trunk_radius_bottom,
+    halfHeight: trunk_height / 2,
+    radius_top: trunk_radius_top,
+    radius_bottom: trunk_radius_bottom,
+    height: trunk_height,
+  });
 }
 
-function createBuilding(x, z, width, height, depth, color) {
+function createBuilding(x, y, z, width, height, depth, color) {
+  const boxCenterY = y + height / 2;
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(width, height, depth),
     new THREE.MeshStandardMaterial({ color })
   );
-  mesh.position.set(x, height / 2, z);
+  mesh.position.set(x, boxCenterY, z);
   scene.add(mesh);
+
+  const quaternion = new THREE.Quaternion();
+  const invQuaternion = quaternion.clone().invert();
   obstacles.push({
     type: "box",
+    x, y: boxCenterY, z,
+    quaternion, invQuaternion,
+    halfWidth: width / 2,
+    halfHeight: height / 2,
+    halfDepth: depth / 2,
     minX: x - width / 2, maxX: x + width / 2,
     minZ: z - depth / 2, maxZ: z + depth / 2,
-    height,
+    topY: y + height,
+    baseY: y,
   });
 }
 
-for (let i = 0; i < 14; i++) {
-  const angle = Math.random() * Math.PI * 2;
-  const distance = 8 + Math.random() * 25;
-  createTree(Math.cos(angle) * distance, Math.sin(angle) * distance);
+function createRotatedBox(x, y, z, width, height, depth, rotation, color) {
+  const { quaternion, invQuaternion } = makeRotationQuaternions(rotation);
+
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(width, height, depth),
+    new THREE.MeshStandardMaterial({ color })
+  );
+  mesh.position.set(x, y, z);
+  mesh.quaternion.copy(quaternion); // stessa rotazione della fisica, altrimenti visuale e collisione divergono
+  scene.add(mesh);
+
+  obstacles.push({
+    type: "box", x, y, z, quaternion, invQuaternion,
+    halfWidth: width / 2, halfHeight: height / 2, halfDepth: depth / 2,
+  });
 }
-createBuilding(-8, -6, 4, 3.5, 4, 0x8a7a6a);
-createBuilding(9, -4, 5, 4.5, 3, 0x9a8a7a);
-createBuilding(0, -14, 6, 5, 5, 0x7a6a5a);
+
+function createColumn(x, y, z, radius, height, rotation, color) {
+  const { quaternion, invQuaternion } = makeRotationQuaternions(rotation);
+
+  const mesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, height, 16),
+    new THREE.MeshStandardMaterial({ color })
+  );
+  mesh.position.set(x, y, z);
+  mesh.quaternion.copy(quaternion);
+  scene.add(mesh);
+
+  obstacles.push({
+    type: "cylinder", x, y, z, quaternion, invQuaternion,
+    radius, halfHeight: height / 2,
+  });
+}
+
+// esempio: una colonna dritta su cui ci si può stare sopra
+createColumn(5, terrainHeightAt(5, 10) + 1.5, 10, 0.5, 3, { x: 0, y: 0, z: 0 }, 0xaaaaaa);
+
+// esempio: una rampa a 45° (un box inclinato attorno all'asse x)
+// createRotatedBox(0, terrainHeightAt(0, 0), 0, 3, 0.3, 6, { x: -Math.PI / 4, y: 0, z: 0 }, 0x998866);
+
+function buildWorldFromServer(worldMap) {
+  buildTerrain(worldMap.terrain);
+  for (const object of worldMap.objects) {
+    if (object.type === "tree") {
+      createTree(object.x, object.y, object.z);
+    } else if (object.type === "building") {
+      createBuilding(object.x, object.y, object.z, object.width, object.height, object.depth, object.color);
+    }
+  }
+}
 
 // ============================================================
-// MODELLO DEL MAGO: sfera (corpo) + cono (cappello) + sfera (naso)
+// MODELLO DEL MAGO: sfera (corpo) + cono (cappello) + sfera (naso) + occhi
 // ============================================================
 function createWizard(color) {
   const group = new THREE.Group();
@@ -257,29 +366,40 @@ function createWizard(color) {
     new THREE.ConeGeometry(0.35, 0.7, 16),
     new THREE.MeshStandardMaterial({ color: 0x1a1a2e })
   );
-  hat.position.y = 0.65;
+  hat.position.y = 0.75;
   head.add(hat);
 
   let nose = new THREE.Mesh(
-    new THREE.SphereGeometry(0.05, 6, 6),
+    new THREE.SphereGeometry(0.1, 6, 6),
     new THREE.MeshStandardMaterial({ color: 0xf5b0b0 })
   );
-  nose.position.z = -0.5;
+  nose.position.z = -0.45;
+  nose.position.y = 0.18;
   nose.scale.set(1.5, 1, 1);
   head.add(nose);
+
+  let left_eye = new THREE.Mesh(
+    new THREE.SphereGeometry(0.04, 6, 6),
+    new THREE.MeshStandardMaterial({ color: 0x000000 })
+  );
+  left_eye.position.set(0.1, 0.26, -0.4);
+  head.add(left_eye);
+
+  let right_eye = new THREE.Mesh(
+    new THREE.SphereGeometry(0.03, 6, 6),
+    new THREE.MeshStandardMaterial({ color: 0x000000 })
+  );
+  right_eye.position.set(-0.1, 0.26, -0.4);
+  head.add(right_eye);
 
   group.add(head);
   scene.add(group);
   return { group, bodyMaterial, head };
 }
 
-// Ancora invisibile per il giocatore locale: la camera E' la sua testa, quindi
-// non ha un modello visibile, ma gli effetti dei suoi incantesimi devono
-// comunque partire da un punto preciso nello spazio 3D.
 const localAnchor = new THREE.Object3D();
 scene.add(localAnchor);
 
-// slot (int) -> { group, bodyMaterial, targetX, targetZ, targetGroundY, targetYaw }
 const remotePlayers = {};
 let mySlot = null;
 let myHp = MAX_HP;
@@ -315,19 +435,10 @@ function updateRemotePlayer(slot, x, z, groundY, yaw, pitch) {
   player.targetPitch = pitch;
 }
 
-// La camera manda la sua altezza occhi (y assoluta, EYE_HEIGHT + eventuale salto).
-// Il modello del mago invece si muove per "altezza da terra" (0 = a terra, cresce
-// mentre salta): la differenza tra le due è sempre EYE_HEIGHT, quindi la
-// sottraiamo per ottenere l'offset verticale corretto del group.
 function eyeHeightToGroundOffset(y) {
   return y - EYE_HEIGHT;
 }
 
-// Un angolo "avvolge" da -π a +π: se lo yaw passa da poco sotto +π a poco sopra
-// -π (o viceversa), la differenza NAIVE (target - attuale) è quasi un giro
-// intero, e il lerp gira a tutta velocità nella direzione sbagliata per
-// "recuperare". Questa funzione trova sempre la differenza più breve possibile
-// (mai oltre mezzo giro), cosi' il lerp gira sempre dalla parte corta.
 function shortestAngleDelta(from, to) {
   let delta = (to - from) % (Math.PI * 2);
   if (delta > Math.PI) delta -= Math.PI * 2;
@@ -337,8 +448,6 @@ function shortestAngleDelta(from, to) {
 
 // ============================================================
 // EFFETTI DEGLI INCANTESIMI
-// Prendono in input l'oggetto Object3D di origine (localAnchor oppure il
-// group di un giocatore remoto) e ne leggono la posizione nel mondo.
 // ============================================================
 let activeParticles = [];
 const worldPosition = new THREE.Vector3();
@@ -361,7 +470,6 @@ function spawnParticles(color, count, origin) {
 }
 
 function getBodyMaterial(anchor) {
-  // il giocatore locale non ha un corpo visibile: niente materiale da far lampeggiare
   return anchor === localAnchor ? null : anchor.userData.bodyMaterial;
 }
 
@@ -420,13 +528,11 @@ function castLightning(anchor, forward, targetAnchor) {
   const mainPoints = generateJaggedPoints(worldPosition, endPoint, 12, 0.3);
 
   const boltMeshes = [];
-  const mainMesh = createBoltMesh(mainPoints, 0.05, SPELL_COLORS.fulmine); // <- spessore del fulmine principale
+  const mainMesh = createBoltMesh(mainPoints, 0.05, SPELL_COLORS.fulmine);
   scene.add(mainMesh);
   boltMeshes.push(mainMesh);
 
-  // diramazioni: partono da un punto a caso lungo il fulmine principale
-  // e proseguono in una direzione casuale per una frazione della lunghezza totale
-  const branchCount = 3 + Math.floor(Math.random() * 3); // 3-5 diramazioni
+  const branchCount = 3 + Math.floor(Math.random() * 3);
   for (let i = 0; i < branchCount; i++) {
     const originIndex = 1 + Math.floor(Math.random() * (mainPoints.length - 2));
     const origin = mainPoints[originIndex];
@@ -436,7 +542,7 @@ function castLightning(anchor, forward, targetAnchor) {
     ).normalize();
     const branchEnd = new THREE.Vector3().copy(origin).addScaledVector(randomDir, branchLength);
     const branchPoints = generateJaggedPoints(origin, branchEnd, 4, branchLength * 0.2);
-    const branchMesh = createBoltMesh(branchPoints, 0.02, SPELL_COLORS.fulmine); // <- diramazioni più sottili
+    const branchMesh = createBoltMesh(branchPoints, 0.02, SPELL_COLORS.fulmine);
     scene.add(branchMesh);
     boltMeshes.push(branchMesh);
   }
@@ -452,8 +558,6 @@ function castLightning(anchor, forward, targetAnchor) {
   spawnParticles(SPELL_COLORS.fulmine, 20, worldPosition);
   if (targetAnchor) spawnParticles(SPELL_COLORS.fulmine, 20, endPoint);
 }
-
-
 
 function castFire(origin, forward, durationMs) {
   const up = Math.abs(forward.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
@@ -526,8 +630,6 @@ function flashDamage(player) {
 }
 
 function castShield(anchor) {
-  // lo scudo e' figlio dell'ancora: segue automaticamente il giocatore senza
-  // bisogno di aggiornare la posizione a mano ad ogni frame
   if (anchor.userData.shieldMesh) anchor.remove(anchor.userData.shieldMesh);
   const mesh = new THREE.Mesh(
     new THREE.SphereGeometry(0.9, 32, 32),
@@ -546,8 +648,6 @@ function getEffectAnchor(slot) {
   return player ? player.group : null;
 }
 
-// colleghiamo bodyMaterial ai group remoti tramite userData, cosi'
-// getBodyMaterial() puo' leggerlo senza bisogno di mappe separate
 function attachBodyMaterial(slot) {
   const player = remotePlayers[slot];
   if (player) player.group.userData.bodyMaterial = player.bodyMaterial;
@@ -580,10 +680,10 @@ controls.addEventListener("lock", () => { overlay.style.display = "none"; crossh
 controls.addEventListener("unlock", () => { overlay.style.display = "flex"; crosshair.style.display = "none"; });
 
 const keys = { forward: false, backward: false, left: false, right: false };
-let velocityX = 0; // velocità orizzontale attuale, in metri/secondo, spazio mondo
+let velocityX = 0;
 let velocityZ = 0;
-let verticalVelocity = 0;  // velocità attuale lungo l'asse Y (positiva = sale, negativa = scende)
-let isGrounded = true;     // sei toccando terra? serve per permettere il salto solo da terra
+let verticalVelocity = 0;
+let isGrounded = true;
 
 document.addEventListener("keydown", (e) => {
   setKey(e.code, true);
@@ -601,69 +701,247 @@ function setKey(code, value) {
   if (code === "KeyD") keys.right = value;
 }
 
-// Quota della superficie calpestabile sotto un punto x/z: il terreno (0) di
-// default, oppure il tetto di un edificio se il punto cade dentro la sua
-// impronta — è così che permettiamo di camminarci sopra.
 function groundHeightAt(x, z) {
-  let height = 0;
+  let height = terrainHeightAt(x, z);
   for (const o of obstacles) {
-    if (o.type === "box" && x > o.minX && x < o.maxX && z > o.minZ && z < o.maxZ) {
-      height = Math.max(height, o.height);
-    }
+    const resolver = SURFACE_HEIGHT_RESOLVERS[o.type];
+    if (!resolver) continue;
+    const h = resolver(o, x, z);
+    if (h !== null && h > height) height = h;
   }
   return height;
 }
 
-// feetHeight = quota attuale dei tuoi piedi (camera.y - EYE_HEIGHT). Serve per
-// decidere se un edificio, per te in questo momento, è un muro solido (sei
-// sotto al suo tetto) o semplicemente il pavimento su cui stai già in piedi.
-function resolveHorizontalCollisions(feetHeight) {
-  for (const o of obstacles) {
-    if (o.type === "circle") {
-      const dx = camera.position.x - o.x;
-      const dz = camera.position.z - o.z;
-      const distance = Math.hypot(dx, dz);
-      const minDistance = o.radius + PLAYER_RADIUS;
-      if (distance < minDistance && distance > 0.0001) {
-        const factor = minDistance / distance;
-        camera.position.x = o.x + dx * factor;
-        camera.position.z = o.z + dz * factor;
-      }
-    } else if (o.type === "box") {
-      if (feetHeight >= o.height - 0.05) continue; // sei sopra (o quasi) il tetto: non è un muro per te
+function makeRotationQuaternions(rotation) {
+  const euler = new THREE.Euler(rotation?.x || 0, rotation?.y || 0, rotation?.z || 0, 'XYZ');
+  const quaternion = new THREE.Quaternion().setFromEuler(euler);
+  const invQuaternion = quaternion.clone().invert();
+  return { quaternion, invQuaternion };
+}
 
-      // punto più vicino al giocatore DENTRO il rettangolo (vedi lezione, sezione 7)
-      const closestX = Math.max(o.minX, Math.min(camera.position.x, o.maxX));
-      const closestZ = Math.max(o.minZ, Math.min(camera.position.z, o.maxZ));
-      const dx = camera.position.x - closestX;
-      const dz = camera.position.z - closestZ;
-      const distance = Math.hypot(dx, dz);
-      if (distance < PLAYER_RADIUS && distance > 0.0001) {
-        const factor = PLAYER_RADIUS / distance;
-        camera.position.x = closestX + dx * factor;
-        camera.position.z = closestZ + dz * factor;
+function toLocalPoint(o, worldPoint) {
+  ensureObstacleTransform(o);
+  return worldPoint.clone().sub(new THREE.Vector3(o.x, o.y, o.z)).applyQuaternion(o.invQuaternion);
+}
+
+function toWorldPoint(o, localPoint) {
+  ensureObstacleTransform(o);
+  return localPoint.clone().applyQuaternion(o.quaternion).add(new THREE.Vector3(o.x, o.y, o.z));
+}
+
+function toLocalDirection(o, worldDirection) {
+  ensureObstacleTransform(o);
+  return worldDirection.clone().applyQuaternion(o.invQuaternion); // solo rotazione, niente traslazione
+}
+
+const RAY_TOP = 200; // altezza da cui "guardiamo in giù": deve stare sopra qualsiasi oggetto della mappa
+
+function rayDownHeightOnBox(o, x, z) {
+  const rayOriginWorld = new THREE.Vector3(x, RAY_TOP, z);
+  const localOrigin = toLocalPoint(o, rayOriginWorld);
+  const localDir = toLocalDirection(o, new THREE.Vector3(0, -1, 0));
+
+  const mins = [-o.halfWidth, -o.halfHeight, -o.halfDepth];
+  const maxs = [o.halfWidth, o.halfHeight, o.halfDepth];
+  const origin = [localOrigin.x, localOrigin.y, localOrigin.z];
+  const dir = [localDir.x, localDir.y, localDir.z];
+
+  let tMin = -Infinity, tMax = Infinity;
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(dir[i]) < 1e-8) {
+      if (origin[i] < mins[i] || origin[i] > maxs[i]) return null; // raggio parallelo e fuori dalla fetta
+      continue;
+    }
+    let t1 = (mins[i] - origin[i]) / dir[i];
+    let t2 = (maxs[i] - origin[i]) / dir[i];
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return null; // nessuna sovrapposizione: il raggio manca il box
+  }
+  if (tMax < 0) return null;
+  const tHit = tMin >= 0 ? tMin : tMax;
+
+  return rayOriginWorld.y - tHit; // direzione è (0,-1,0): scendere di tHit riduce y esattamente di tHit
+}
+
+function rayDownHeightOnCylinder(o, x, z) {
+  const rayOriginWorld = new THREE.Vector3(x, RAY_TOP, z);
+  const O = toLocalPoint(o, rayOriginWorld);
+  const D = toLocalDirection(o, new THREE.Vector3(0, -1, 0));
+  const r = o.radius, hh = o.halfHeight;
+  let bestT = null;
+
+  // superficie laterale: (Ox+t·Dx)² + (Oz+t·Dz)² = r²
+  const a = D.x * D.x + D.z * D.z;
+  if (a > 1e-8) {
+    const b = 2 * (O.x * D.x + O.z * D.z);
+    const c = O.x * O.x + O.z * O.z - r * r;
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const sqrtDisc = Math.sqrt(disc);
+      for (const t of [(-b - sqrtDisc) / (2 * a), (-b + sqrtDisc) / (2 * a)]) {
+        if (t < 0) continue;
+        const y = O.y + t * D.y;
+        if (y >= -hh && y <= hh && (bestT === null || t < bestT)) bestT = t;
       }
     }
+  }
+
+  // i due "coperchi" piatti del cilindro
+  if (Math.abs(D.y) > 1e-8) {
+    for (const capY of [hh, -hh]) {
+      const t = (capY - O.y) / D.y;
+      if (t < 0) continue;
+      const hx = O.x + t * D.x, hz = O.z + t * D.z;
+      if (hx * hx + hz * hz <= r * r && (bestT === null || t < bestT)) bestT = t;
+    }
+  }
+
+  if (bestT === null) return null;
+  return rayOriginWorld.y - bestT;
+}
+
+function closestPointOnBoxLocal(o, localPoint) {
+  return new THREE.Vector3(
+    THREE.MathUtils.clamp(localPoint.x, -o.halfWidth, o.halfWidth),
+    THREE.MathUtils.clamp(localPoint.y, -o.halfHeight, o.halfHeight),
+    THREE.MathUtils.clamp(localPoint.z, -o.halfDepth, o.halfDepth)
+  );
+}
+
+function closestPointOnCylinderLocal(o, localPoint) {
+  const clampedY = THREE.MathUtils.clamp(localPoint.y, -o.halfHeight, o.halfHeight);
+  const radial = Math.hypot(localPoint.x, localPoint.z);
+  const scale = radial > o.radius ? o.radius / radial : 1;
+  return new THREE.Vector3(localPoint.x * scale, clampedY, localPoint.z * scale);
+}
+
+// Tratta il giocatore come una sfera di raggio PLAYER_RADIUS: se il punto più
+// vicino sulla superficie dista meno del raggio, spinge fuori SOLO in
+// orizzontale (mai in verticale, ci pensa la gravità). La componente verticale
+// della distanza riduce la spinta orizzontale disponibile — è questo che ti
+// permette di passare sotto un oggetto sospeso invece di essere sempre
+// respinto lateralmente indipendentemente da quanto sei più in basso.
+function applySpherePush(worldPoint, closestWorld) {
+  const offset = worldPoint.clone().sub(closestWorld);
+  const distance = offset.length();
+  if (distance >= PLAYER_RADIUS || distance <= 0.0001) return;
+
+  const horizontal = new THREE.Vector2(offset.x, offset.z);
+  const horizontalDistance = horizontal.length();
+  if (horizontalDistance <= 0.0001) return;
+
+  const pushDistance = Math.sqrt(Math.max(0, PLAYER_RADIUS * PLAYER_RADIUS - offset.y * offset.y));
+  const factor = pushDistance / horizontalDistance;
+  camera.position.x = closestWorld.x + horizontal.x * factor;
+  camera.position.z = closestWorld.z + horizontal.y * factor; // .y di un Vector2 è la sua seconda componente (qui: z)
+}
+
+function resolveBoxCollision(o, feetHeight) {
+  const surfaceY = rayDownHeightOnBox(o, camera.position.x, camera.position.z);
+  if (surfaceY !== null && feetHeight >= surfaceY - 0.05) return; // sei sopra: nessun push laterale
+
+  // Se l'oggetto è un edificio semplice con topY impostato, considera il tetto
+  // come una superficie di appoggio e non come muro laterale.
+  if (o.topY !== undefined && feetHeight >= o.topY - 0.05) return;
+
+  const localPoint = toLocalPoint(o, camera.position);
+  const closestWorld = toWorldPoint(o, closestPointOnBoxLocal(o, localPoint));
+  applySpherePush(camera.position, closestWorld);
+}
+
+function resolveCylinderCollision(o, feetHeight) {
+  const surfaceY = rayDownHeightOnCylinder(o, camera.position.x, camera.position.z);
+  if (surfaceY !== null && feetHeight >= surfaceY - 0.05) return;
+
+  const localPoint = toLocalPoint(o, camera.position);
+  const closestWorld = toWorldPoint(o, closestPointOnCylinderLocal(o, localPoint));
+  applySpherePush(camera.position, closestWorld);
+}
+
+function resolveCircleCollision(o, feetHeight) {
+  // Cilindro pieno per tutta l'altezza (es. tronco+chioma di un albero
+  // trattati come un unico cilindro): nessun controllo su feetHeight,
+  // collide sempre, indipendentemente da quanto sei in alto.
+  const dx = camera.position.x - o.x;
+  const dz = camera.position.z - o.z;
+  const distance = Math.hypot(dx, dz);
+  const minDistance = o.radius + PLAYER_RADIUS;
+  if (distance < minDistance && distance > 0.0001) {
+    const factor = minDistance / distance;
+    camera.position.x = o.x + dx * factor;
+    camera.position.z = o.z + dz * factor;
+  }
+}
+
+function resolveConeCollision(o, feetHeight) {
+  // o: { x, z, baseY, height, radiusBase, radiusTop }
+  // Il raggio del cono varia linearmente con l'altezza: stessa idea del
+  // cono tronco del fuoco, ma qui il parametro che varia è "quanto sei
+  // in alto rispetto alla base del cono", non "quanto sei avanti".
+  const heightAboveBase = feetHeight - o.baseY;
+  if (heightAboveBase < 0 || heightAboveBase > o.height) return; // sei sotto la base o sopra la punta: non tocchi il cono
+
+  const t = heightAboveBase / o.height;
+  const radiusHere = o.radiusBase + t * (o.radiusTop - o.radiusBase);
+  const minDistance = radiusHere + PLAYER_RADIUS;
+
+  const dx = camera.position.x - o.x;
+  const dz = camera.position.z - o.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance < minDistance && distance > 0.0001) {
+    const factor = minDistance / distance;
+    camera.position.x = o.x + dx * factor;
+    camera.position.z = o.z + dz * factor;
+  }
+}
+
+const SURFACE_HEIGHT_RESOLVERS = {
+  box: rayDownHeightOnBox,
+  cylinder: rayDownHeightOnCylinder,
+};
+
+const COLLISION_RESOLVERS = {
+  circle: resolveCircleCollision,   // resta per gli alberi: cilindro infinito verticale, mai "sopra"
+  box: resolveBoxCollision,
+  cylinder: resolveCylinderCollision,
+};
+
+function resolveHorizontalCollisions(feetHeight) {
+  for (const o of obstacles) {
+    const resolver = COLLISION_RESOLVERS[o.type];
+    if (resolver) resolver(o, feetHeight);
   }
 }
 
 function updateVerticalMovement(delta) {
   if (!controls.isLocked) return;
 
-  verticalVelocity -= GRAVITY * delta;       // la gravità tira sempre verso il basso
+  verticalVelocity -= GRAVITY * delta;
   camera.position.y += verticalVelocity * delta;
 
   const groundHeight = groundHeightAt(camera.position.x, camera.position.z);
   const minCameraY = groundHeight + EYE_HEIGHT;
 
   if (camera.position.y <= minCameraY) {
-    // hai toccato la superficie sotto di te (terreno o tetto): fermati lì
     camera.position.y = minCameraY;
     verticalVelocity = 0;
     isGrounded = true;
   } else {
     isGrounded = false;
   }
+}
+
+let pointerLockRequestPending = false;
+
+function requestPointerLock() {
+  if (document.pointerLockElement === document.body || pointerLockRequestPending) return;
+  pointerLockRequestPending = true;
+  setTimeout(() => {
+    controls.lock();
+    pointerLockRequestPending = false;
+  }, 40);
 }
 
 function updateMovement(delta) {
@@ -680,9 +958,6 @@ function updateMovement(delta) {
       const length = Math.hypot(dx, dz);
       dx /= length; dz /= length;
 
-      // stessa rotazione usata nel ramo aereo: cosi' la velocità che
-      // "portiamo con noi" in un eventuale salto punta esattamente nella
-      // direzione in cui si stava camminando, vista dalla camera
       const moveDirection = new THREE.Vector3(dx, 0, dz).applyQuaternion(camera.quaternion);
       moveDirection.y = 0;
       moveDirection.normalize();
@@ -694,7 +969,6 @@ function updateMovement(delta) {
       controls.moveRight(dx * step);
       controls.moveForward(-dz * step);
     } else {
-      // fermo a terra: nessuna inerzia da portare in un eventuale salto
       velocityX = 0;
       velocityZ = 0;
     }
@@ -756,7 +1030,8 @@ async function connectToServer() {
 
     if (message.type === "welcome") {
       mySlot = message.your_slot;
-      camera.position.set(message.spawn_x, EYE_HEIGHT, message.spawn_z);
+      camera.position.set(message.spawn_x, message.spawn_y, message.spawn_z);
+      buildWorldFromServer(message.world_map);
       updateHealthBar(MAX_HP);
       myHp = MAX_HP;
       for (const p of message.players) {
@@ -831,7 +1106,7 @@ async function connectToServer() {
 
     if (message.type === "player_respawn") {
       if (message.slot === mySlot) {
-        camera.position.set(message.x, EYE_HEIGHT, message.z);
+        camera.position.set(message.x, message.y, message.z);
         updateHealthBar(message.hp);
         myHp = message.hp;
         hud.textContent = `Slot ${mySlot + 1} - in ascolto`;
@@ -872,7 +1147,6 @@ function sendPositionIfDue() {
   const now = performance.now();
   if (now - lastPositionSentAt < POSITION_SEND_INTERVAL_MS) return;
   lastPositionSentAt = now;
-  // lo yaw (rotazione orizzontale) si legge dalla rotazione Y dell'oggetto camera
   socket.send(JSON.stringify({
     type: "position",
     x: camera.position.x,
@@ -885,7 +1159,7 @@ function sendPositionIfDue() {
 
 overlay.addEventListener("click", async () => {
   if (!socket) await connectToServer();
-  controls.lock();
+  requestPointerLock();
 });
 
 // ============================================================
@@ -903,7 +1177,6 @@ function animate() {
   updateVerticalMovement(delta);
   sendPositionIfDue();
 
-  // ancora locale: segue la camera, ma un po' piu' in basso (altezza corpo, non occhi)
   localAnchor.position.set(
     camera.position.x,
     camera.position.y - (EYE_HEIGHT - BODY_HEIGHT),
