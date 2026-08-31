@@ -25,9 +25,37 @@
 
   #hud { position: fixed; top: 20px; left: 20px; font-size: 0.8rem; color: #9aa3c0; }
 
+  #healthbar-container {
+    position: fixed; top: 50%; left: 24px; transform: translateY(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 6px; z-index: 5;
+    border-radius: 10px;
+    padding: 10px;
+    background-color: rgba(0, 0, 0, 0.8);
+  }
+  #healthbar-track {
+    width: 16px; height: 220px; border-radius: 8px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+  }
+  #healthbar-fill {
+    width: 100%; height: 100%; background: #4caf50;
+    transition: height 0.25s ease, background 0.25s ease;
+  }
+  #healthbar-label {
+    font-family: 'Cinzel', serif; font-size: 0.72rem; color: #cbd3e6; letter-spacing: 0.05em;
+  }
+  #damage-vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 8;
+    background: radial-gradient(circle, transparent 40%, rgba(255,0,0,0.75) 100%);
+    opacity: 0;
+    transition: opacity 0.15s ease-out;
+  }
   #spells {
     position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
     display: flex; gap: 28px;
+    border-radius: 10px;
+    padding: 10px;
+    background-color: rgba(0, 0, 0, 0.8);
   }
   .spell { font-family: 'Cinzel', serif; text-align: center; width: 92px; }
   .spell .name { font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
@@ -43,6 +71,11 @@
 <canvas id="scene"></canvas>
 <div id="crosshair"></div>
 <div id="hud">Non connesso</div>
+<div id="healthbar-container">
+  <div id="healthbar-track"><div id="healthbar-fill"></div></div>
+  <div id="healthbar-label">100</div>
+</div>
+<div id="damage-vignette"></div>
 <div id="overlay">
   <div>
     <h2>Clicca per entrare</h2>
@@ -62,20 +95,61 @@
 // ============================================================
 // CONFIGURAZIONE
 // ============================================================
-const WS_URL = "wss://192.168.1.170:8765"; // aggiorna con il tuo IP
-const COOLDOWN_MS = 1800;      // deve combaciare con COOLDOWN_MS nel server
-const MOVE_SPEED = 4.0;        // metri al secondo
-const EYE_HEIGHT = 1.7;
-const BODY_HEIGHT = 0.9;       // altezza approssimativa del corpo del mago, per gli effetti
+const WS_URL = "wss://grace-game-quantitative-buy.trycloudflare.com"; // aggiorna con il tuo IP
+
+const MOVE_SPEED = 8.0;        // metri al secondo (raddoppiata su tua richiesta)
+const ACCELERATION = 20.0;     // metri/secondo^2 quando c'è input
+const FRICTION = 10.0;         // metri/secondo^2 di decelerazione quando non c'è input
+const BODY_HEIGHT = 0.5;       // centro della sfera-corpo = il suo raggio, cosi' il fondo tocca terra
+const EYE_HEIGHT = BODY_HEIGHT + 0.3; // "sopra il naso": il naso e' al centro della sfera, gli occhi un po' più in alto
+const GRAVITY = 18.0;           // metri al secondo^2: quanto velocemente accelera la caduta
+const JUMP_SPEED = 13.0;        // velocità verticale impressa al salto (raddoppiata: nota che l'altezza
+                                 // del salto cresce col QUADRATO della velocità, quindi non e' semplicemente doppia
 const PLAYER_RADIUS = 0.35;
 const POSITION_SEND_INTERVAL_MS = 100; // quante volte al secondo mandiamo la nostra posizione
 const REMOTE_LERP_FACTOR = 0.18;       // quanto velocemente gli altri giocatori "raggiungono" l'ultima posizione ricevuta
 
+const FIRE_DURATION_S = 5; // deve combaciare col server
 const SPELL_COLORS = { fulmine: 0xa3d5ff, scudo: 0x4fd1c5, fuoco: 0xff6b35 };
+const SPELLS_COOLDOWNS = {"fulmine": 18000, "scudo": 3000, "fuoco": 7000 + FIRE_DURATION_S * 1000};
+const MAX_HP = 100; // deve combaciare con MAX_HP nel server
+const LIGHTNING_RANGE = 20;      // solo per l'aspetto visivo, combacia col server
+const FIRE_DEPTH = 5;
+const FIRE_RADIUS_NEAR = 0.5;
+const FIRE_RADIUS_FAR = 2.5;
 
-// ============================================================
-// SCENA BASE (identica al prototipo, ora con nomi in inglese)
-// ============================================================
+const healthFillEl = document.getElementById("healthbar-fill");
+const healthLabelEl = document.getElementById("healthbar-label");
+const damageVignetteEl = document.getElementById("damage-vignette");
+let vignetteFadeTimeout = null;
+
+function flashDamageVignette(damageAmount) {
+  // più danno = flash più intenso, ma non oltre 1
+  const intensity = Math.min(1, 0.35 + damageAmount / 100);
+  damageVignetteEl.style.transition = "none";
+  damageVignetteEl.style.opacity = intensity;
+
+  // forza il browser a "registrare" l'opacità piena prima di far partire il fade,
+  // altrimenti l'assenza di transizione sopra farebbe sparire tutto istantaneamente
+  requestAnimationFrame(() => {
+    damageVignetteEl.style.transition = "opacity 0.6s ease-out";
+    damageVignetteEl.style.opacity = 0;
+  });
+
+  clearTimeout(vignetteFadeTimeout);
+  vignetteFadeTimeout = setTimeout(() => { damageVignetteEl.style.opacity = 0; }, 700);
+}
+
+function updateHealthBar(hp) {
+  const clamped = Math.max(0, Math.min(MAX_HP, hp));
+  const fraction = clamped / MAX_HP;
+  healthFillEl.style.height = `${fraction * 100}%`;
+  healthLabelEl.textContent = Math.round(clamped);
+  const hue = fraction * 120; // scivola dal verde (120) al rosso (0)
+  healthFillEl.style.background = `hsl(${hue}, 70%, 45%)`;
+}
+
+// ===== SCENA BASE =====
 const canvas = document.getElementById("scene");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -87,6 +161,10 @@ scene.fog = new THREE.Fog(0x87ceeb, 15, 55);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 200);
 camera.position.set(0, EYE_HEIGHT, 5);
+// PointerLockControls compone la rotazione con ordine 'YXZ' (prima yaw, poi pitch).
+// Se non allineiamo anche qui l'ordine, leggere camera.rotation.y per la rete
+// restituisce uno yaw "sporcato" dal pitch non appena guardi su o giù.
+camera.rotation.order = "YXZ";
 
 window.addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
@@ -99,15 +177,22 @@ const sun = new THREE.DirectionalLight(0xfff4e0, 1.2);
 sun.position.set(10, 20, 8);
 scene.add(sun);
 
+const textureLoader = new THREE.TextureLoader();
+const grassTexture = textureLoader.load("https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/terrain/grasslight-big.jpg");
+grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
+grassTexture.repeat.set(5, 5); // ripete la texture invece di stirarla su 80x80 metri
+
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(80, 80),
-  new THREE.MeshStandardMaterial({ color: 0x3d6b3d })
+  new THREE.MeshStandardMaterial({ map: grassTexture })
 );
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
 // ============================================================
-// OSTACOLI STATICI (alberi ed edifici): { x, z, radius }
+// OSTACOLI STATICI: alberi come cerchi (il tronco/chioma non e' un
+// pavimento su cui stare), edifici come veri rettangoli (box) su cui
+// SI PUO' camminare sopra se la quota lo permette.
 // ============================================================
 const obstacles = [];
 
@@ -127,7 +212,7 @@ function createTree(x, z) {
   group.add(foliage);
   group.position.set(x, 0, z);
   scene.add(group);
-  obstacles.push({ x, z, radius: 0.6 });
+  obstacles.push({ type: "circle", x, z, radius: 0.6 });
 }
 
 function createBuilding(x, z, width, height, depth, color) {
@@ -137,7 +222,12 @@ function createBuilding(x, z, width, height, depth, color) {
   );
   mesh.position.set(x, height / 2, z);
   scene.add(mesh);
-  obstacles.push({ x, z, radius: Math.sqrt(width * width + depth * depth) / 2 });
+  obstacles.push({
+    type: "box",
+    minX: x - width / 2, maxX: x + width / 2,
+    minZ: z - depth / 2, maxZ: z + depth / 2,
+    height,
+  });
 }
 
 for (let i = 0; i < 14; i++) {
@@ -150,7 +240,7 @@ createBuilding(9, -4, 5, 4.5, 3, 0x9a8a7a);
 createBuilding(0, -14, 6, 5, 5, 0x7a6a5a);
 
 // ============================================================
-// MODELLO DEL MAGO: sfera (corpo) + cono (cappello)
+// MODELLO DEL MAGO: sfera (corpo) + cono (cappello) + sfera (naso)
 // ============================================================
 function createWizard(color) {
   const group = new THREE.Group();
@@ -160,15 +250,27 @@ function createWizard(color) {
   body.position.y = BODY_HEIGHT;
   group.add(body);
 
+  const head = new THREE.Group();
+  head.position.y = BODY_HEIGHT; // pivot di rotazione = centro del corpo
+
   const hat = new THREE.Mesh(
     new THREE.ConeGeometry(0.35, 0.7, 16),
     new THREE.MeshStandardMaterial({ color: 0x1a1a2e })
   );
-  hat.position.y = BODY_HEIGHT + 0.65;
-  group.add(hat);
+  hat.position.y = 0.65;
+  head.add(hat);
 
+  let nose = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 6, 6),
+    new THREE.MeshStandardMaterial({ color: 0xf5b0b0 })
+  );
+  nose.position.z = -0.5;
+  nose.scale.set(1.5, 1, 1);
+  head.add(nose);
+
+  group.add(head);
   scene.add(group);
-  return { group, bodyMaterial };
+  return { group, bodyMaterial, head };
 }
 
 // Ancora invisibile per il giocatore locale: la camera E' la sua testa, quindi
@@ -177,17 +279,23 @@ function createWizard(color) {
 const localAnchor = new THREE.Object3D();
 scene.add(localAnchor);
 
-// slot (int) -> { group, bodyMaterial, targetX, targetZ, targetYaw }
+// slot (int) -> { group, bodyMaterial, targetX, targetZ, targetGroundY, targetYaw }
 const remotePlayers = {};
 let mySlot = null;
+let myHp = MAX_HP;
 
-function addRemotePlayer(slot, x, z, yaw) {
-  if (remotePlayers[slot]) return; // gia' presente, evita duplicati
-  const color = 0x4040ff + slot * 0x203040; // colore diverso per ogni slot, giusto per distinguerli
-  const { group, bodyMaterial } = createWizard(color);
-  group.position.set(x, 0, z);
+function addRemotePlayer(slot, x, z, groundY, yaw, pitch) {
+  if (remotePlayers[slot]) return;
+  const color = 0x4040ff + slot * 0x203040;
+  const { group, bodyMaterial, head } = createWizard(color);
+  group.position.set(x, groundY, z);
   group.rotation.y = yaw;
-  remotePlayers[slot] = { group, bodyMaterial, targetX: x, targetZ: z, targetYaw: yaw };
+  head.rotation.x = pitch;
+  remotePlayers[slot] = {
+    group, bodyMaterial, head,
+    targetX: x, targetZ: z, targetGroundY: groundY, targetYaw: yaw, targetPitch: pitch,
+    hp: MAX_HP,
+  };
 }
 
 function removeRemotePlayer(slot) {
@@ -197,12 +305,34 @@ function removeRemotePlayer(slot) {
   delete remotePlayers[slot];
 }
 
-function updateRemotePlayer(slot, x, z, yaw) {
+function updateRemotePlayer(slot, x, z, groundY, yaw, pitch) {
   const player = remotePlayers[slot];
   if (!player) return;
   player.targetX = x;
   player.targetZ = z;
+  player.targetGroundY = groundY;
   player.targetYaw = yaw;
+  player.targetPitch = pitch;
+}
+
+// La camera manda la sua altezza occhi (y assoluta, EYE_HEIGHT + eventuale salto).
+// Il modello del mago invece si muove per "altezza da terra" (0 = a terra, cresce
+// mentre salta): la differenza tra le due è sempre EYE_HEIGHT, quindi la
+// sottraiamo per ottenere l'offset verticale corretto del group.
+function eyeHeightToGroundOffset(y) {
+  return y - EYE_HEIGHT;
+}
+
+// Un angolo "avvolge" da -π a +π: se lo yaw passa da poco sotto +π a poco sopra
+// -π (o viceversa), la differenza NAIVE (target - attuale) è quasi un giro
+// intero, e il lerp gira a tutta velocità nella direzione sbagliata per
+// "recuperare". Questa funzione trova sempre la differenza più breve possibile
+// (mai oltre mezzo giro), cosi' il lerp gira sempre dalla parte corta.
+function shortestAngleDelta(from, to) {
+  let delta = (to - from) % (Math.PI * 2);
+  if (delta > Math.PI) delta -= Math.PI * 2;
+  if (delta < -Math.PI) delta += Math.PI * 2;
+  return delta;
 }
 
 // ============================================================
@@ -235,26 +365,164 @@ function getBodyMaterial(anchor) {
   return anchor === localAnchor ? null : anchor.userData.bodyMaterial;
 }
 
-function castLightning(anchor) {
+function forwardVector(yaw, pitch) {
+  return new THREE.Vector3(
+    -Math.cos(pitch) * Math.sin(yaw),
+    Math.sin(pitch),
+    -Math.cos(pitch) * Math.cos(yaw)
+  );
+}
+
+function getCasterOrientation(slot) {
+  if (slot === mySlot) return { yaw: camera.rotation.y, pitch: camera.rotation.x };
+  const player = remotePlayers[slot];
+  return player ? { yaw: player.group.rotation.y, pitch: player.head.rotation.x } : { yaw: 0, pitch: 0 };
+}
+
+function generateJaggedPoints(start, end, segments, jitter) {
+  const points = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const point = new THREE.Vector3().lerpVectors(start, end, t);
+    if (i > 0 && i < segments) {
+      point.x += (Math.random() - 0.5) * jitter;
+      point.y += (Math.random() - 0.5) * jitter;
+      point.z += (Math.random() - 0.5) * jitter;
+    }
+    points.push(point);
+  }
+  return points;
+}
+
+function createBoltMesh(points, radius, color) {
+  const curve = new THREE.CatmullRomCurve3(points);
+  const geometry = new THREE.TubeGeometry(curve, points.length * 2, radius, 6, false);
+  const material = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.9,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  return new THREE.Mesh(geometry, material);
+}
+
+function castLightning(anchor, forward, targetAnchor) {
   anchor.getWorldPosition(worldPosition);
   const material = getBodyMaterial(anchor);
   if (material) { material.emissive.set(SPELL_COLORS.fulmine); material.emissiveIntensity = 2.2; }
 
-  const boltPoints = [];
-  let x = worldPosition.x, y = worldPosition.y + 3.4;
-  while (y > worldPosition.y) {
-    boltPoints.push(new THREE.Vector3(x, y, worldPosition.z));
-    x += (Math.random() - 0.5) * 0.5;
-    y -= 0.4;
+  const endPoint = new THREE.Vector3();
+  if (targetAnchor) {
+    targetAnchor.getWorldPosition(endPoint);
+  } else {
+    endPoint.copy(worldPosition).addScaledVector(forward, LIGHTNING_RANGE);
   }
-  const bolt = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(boltPoints),
-    new THREE.LineBasicMaterial({ color: SPELL_COLORS.fulmine })
-  );
-  scene.add(bolt);
-  setTimeout(() => scene.remove(bolt), 150);
 
-  spawnParticles(SPELL_COLORS.fulmine, 30, worldPosition);
+  const totalLength = worldPosition.distanceTo(endPoint);
+  const mainPoints = generateJaggedPoints(worldPosition, endPoint, 12, 0.3);
+
+  const boltMeshes = [];
+  const mainMesh = createBoltMesh(mainPoints, 0.05, SPELL_COLORS.fulmine); // <- spessore del fulmine principale
+  scene.add(mainMesh);
+  boltMeshes.push(mainMesh);
+
+  // diramazioni: partono da un punto a caso lungo il fulmine principale
+  // e proseguono in una direzione casuale per una frazione della lunghezza totale
+  const branchCount = 3 + Math.floor(Math.random() * 3); // 3-5 diramazioni
+  for (let i = 0; i < branchCount; i++) {
+    const originIndex = 1 + Math.floor(Math.random() * (mainPoints.length - 2));
+    const origin = mainPoints[originIndex];
+    const branchLength = totalLength * (0.15 + Math.random() * 0.25);
+    const randomDir = new THREE.Vector3(
+      (Math.random() - 0.5), (Math.random() - 0.5) * 0.6, (Math.random() - 0.5)
+    ).normalize();
+    const branchEnd = new THREE.Vector3().copy(origin).addScaledVector(randomDir, branchLength);
+    const branchPoints = generateJaggedPoints(origin, branchEnd, 4, branchLength * 0.2);
+    const branchMesh = createBoltMesh(branchPoints, 0.02, SPELL_COLORS.fulmine); // <- diramazioni più sottili
+    scene.add(branchMesh);
+    boltMeshes.push(branchMesh);
+  }
+
+  setTimeout(() => {
+    boltMeshes.forEach(mesh => {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    });
+  }, 150);
+
+  spawnParticles(SPELL_COLORS.fulmine, 20, worldPosition);
+  if (targetAnchor) spawnParticles(SPELL_COLORS.fulmine, 20, endPoint);
+}
+
+
+
+function castFire(origin, forward, durationMs) {
+  const up = Math.abs(forward.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+  const trueUp = new THREE.Vector3().crossVectors(right, forward).normalize();
+
+  const fireLight = new THREE.PointLight(SPELL_COLORS.fuoco, 2.5, 7);
+  fireLight.position.copy(origin).addScaledVector(forward, FIRE_DEPTH * 0.5);
+  fireLight.position.y += 0.4;
+  scene.add(fireLight);
+
+  const startTime = performance.now();
+  const spawnIntervalMs = 90;
+  let lastSpawn = 0;
+
+  function tick() {
+    const elapsed = performance.now() - startTime;
+    if (elapsed >= durationMs) {
+      scene.remove(fireLight);
+      return;
+    }
+    if (elapsed - lastSpawn >= spawnIntervalMs) {
+      lastSpawn = elapsed;
+      spawnConeParticles(SPELL_COLORS.fuoco, 14, origin, forward, right, trueUp);
+      fireLight.intensity = 1.8 + Math.random() * 1.4;
+      fireLight.position.y = origin.y + 0.3 + Math.random() * 0.2;
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+function spawnConeParticles(color, count, origin, forward, right, up) {
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const velocities = [];
+  for (let i = 0; i < count; i++) {
+    const depthT = Math.random();
+    const depth = depthT * FIRE_DEPTH;
+    const radiusHere = FIRE_RADIUS_NEAR + depthT * (FIRE_RADIUS_FAR - FIRE_RADIUS_NEAR);
+    const angle = Math.random() * Math.PI * 2;
+    const lateral = Math.random() * radiusHere;
+
+    const point = new THREE.Vector3()
+      .copy(origin)
+      .addScaledVector(forward, depth)
+      .addScaledVector(right, Math.cos(angle) * lateral)
+      .addScaledVector(up, Math.sin(angle) * lateral);
+
+    positions[i * 3 + 0] = point.x;
+    positions[i * 3 + 1] = point.y;
+    positions[i * 3 + 2] = point.z;
+
+    velocities.push(
+      new THREE.Vector3()
+        .addScaledVector(forward, 1.5)
+        .add(new THREE.Vector3((Math.random() - 0.5) * 1.5, Math.random() * 1.2, (Math.random() - 0.5) * 1.5))
+    );
+  }
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({ color, size: 0.08, transparent: true, opacity: 1 });
+  const points = new THREE.Points(geometry, material);
+  scene.add(points);
+  activeParticles.push({ points, velocities, born: performance.now(), lifetime: 700 });
+}
+
+function flashDamage(player) {
+  player.bodyMaterial.emissive.set(0xff0000);
+  player.bodyMaterial.emissiveIntensity = 2.0;
 }
 
 function castShield(anchor) {
@@ -271,15 +539,6 @@ function castShield(anchor) {
   anchor.add(mesh);
   anchor.userData.shieldMesh = mesh;
 }
-
-function castFire(anchor) {
-  anchor.getWorldPosition(worldPosition);
-  const material = getBodyMaterial(anchor);
-  if (material) { material.emissive.set(SPELL_COLORS.fuoco); material.emissiveIntensity = 1.6; }
-  spawnParticles(SPELL_COLORS.fuoco, 45, worldPosition);
-}
-
-const SPELL_EFFECTS = { fulmine: castLightning, scudo: castShield, fuoco: castFire };
 
 function getEffectAnchor(slot) {
   if (slot === mySlot) return localAnchor;
@@ -304,7 +563,7 @@ document.querySelectorAll(".fill").forEach(el => cooldownBars[el.dataset.spell] 
 function updateCooldownBars() {
   const now = performance.now();
   for (const name in cooldownBars) {
-    const fraction = Math.min((now - lastLocalCast[name]) / COOLDOWN_MS, 1);
+    const fraction = Math.min((now - lastLocalCast[name]) / SPELLS_COOLDOWNS[name], 1);
     cooldownBars[name].style.transform = `scaleX(${fraction})`;
   }
 }
@@ -321,7 +580,18 @@ controls.addEventListener("lock", () => { overlay.style.display = "none"; crossh
 controls.addEventListener("unlock", () => { overlay.style.display = "flex"; crosshair.style.display = "none"; });
 
 const keys = { forward: false, backward: false, left: false, right: false };
-document.addEventListener("keydown", (e) => setKey(e.code, true));
+let velocityX = 0; // velocità orizzontale attuale, in metri/secondo, spazio mondo
+let velocityZ = 0;
+let verticalVelocity = 0;  // velocità attuale lungo l'asse Y (positiva = sale, negativa = scende)
+let isGrounded = true;     // sei toccando terra? serve per permettere il salto solo da terra
+
+document.addEventListener("keydown", (e) => {
+  setKey(e.code, true);
+  if (e.code === "Space" && isGrounded && controls.isLocked) {
+    verticalVelocity = JUMP_SPEED;
+    isGrounded = false;
+  }
+});
 document.addEventListener("keyup", (e) => setKey(e.code, false));
 
 function setKey(code, value) {
@@ -331,38 +601,142 @@ function setKey(code, value) {
   if (code === "KeyD") keys.right = value;
 }
 
-function resolveCollisions() {
+// Quota della superficie calpestabile sotto un punto x/z: il terreno (0) di
+// default, oppure il tetto di un edificio se il punto cade dentro la sua
+// impronta — è così che permettiamo di camminarci sopra.
+function groundHeightAt(x, z) {
+  let height = 0;
   for (const o of obstacles) {
-    const dx = camera.position.x - o.x;
-    const dz = camera.position.z - o.z;
-    const distance = Math.hypot(dx, dz);
-    const minDistance = o.radius + PLAYER_RADIUS;
-    if (distance < minDistance && distance > 0.0001) {
-      const factor = minDistance / distance;
-      camera.position.x = o.x + dx * factor;
-      camera.position.z = o.z + dz * factor;
+    if (o.type === "box" && x > o.minX && x < o.maxX && z > o.minZ && z < o.maxZ) {
+      height = Math.max(height, o.height);
     }
   }
-  camera.position.y = EYE_HEIGHT;
+  return height;
+}
+
+// feetHeight = quota attuale dei tuoi piedi (camera.y - EYE_HEIGHT). Serve per
+// decidere se un edificio, per te in questo momento, è un muro solido (sei
+// sotto al suo tetto) o semplicemente il pavimento su cui stai già in piedi.
+function resolveHorizontalCollisions(feetHeight) {
+  for (const o of obstacles) {
+    if (o.type === "circle") {
+      const dx = camera.position.x - o.x;
+      const dz = camera.position.z - o.z;
+      const distance = Math.hypot(dx, dz);
+      const minDistance = o.radius + PLAYER_RADIUS;
+      if (distance < minDistance && distance > 0.0001) {
+        const factor = minDistance / distance;
+        camera.position.x = o.x + dx * factor;
+        camera.position.z = o.z + dz * factor;
+      }
+    } else if (o.type === "box") {
+      if (feetHeight >= o.height - 0.05) continue; // sei sopra (o quasi) il tetto: non è un muro per te
+
+      // punto più vicino al giocatore DENTRO il rettangolo (vedi lezione, sezione 7)
+      const closestX = Math.max(o.minX, Math.min(camera.position.x, o.maxX));
+      const closestZ = Math.max(o.minZ, Math.min(camera.position.z, o.maxZ));
+      const dx = camera.position.x - closestX;
+      const dz = camera.position.z - closestZ;
+      const distance = Math.hypot(dx, dz);
+      if (distance < PLAYER_RADIUS && distance > 0.0001) {
+        const factor = PLAYER_RADIUS / distance;
+        camera.position.x = closestX + dx * factor;
+        camera.position.z = closestZ + dz * factor;
+      }
+    }
+  }
+}
+
+function updateVerticalMovement(delta) {
+  if (!controls.isLocked) return;
+
+  verticalVelocity -= GRAVITY * delta;       // la gravità tira sempre verso il basso
+  camera.position.y += verticalVelocity * delta;
+
+  const groundHeight = groundHeightAt(camera.position.x, camera.position.z);
+  const minCameraY = groundHeight + EYE_HEIGHT;
+
+  if (camera.position.y <= minCameraY) {
+    // hai toccato la superficie sotto di te (terreno o tetto): fermati lì
+    camera.position.y = minCameraY;
+    verticalVelocity = 0;
+    isGrounded = true;
+  } else {
+    isGrounded = false;
+  }
 }
 
 function updateMovement(delta) {
   if (!controls.isLocked) return;
 
-  let dx = 0, dz = 0;
-  if (keys.forward) dz -= 1;
-  if (keys.backward) dz += 1;
-  if (keys.left) dx -= 1;
-  if (keys.right) dx += 1;
+  if (isGrounded) {
+    let dx = 0, dz = 0;
+    if (keys.forward) dz -= 1;
+    if (keys.backward) dz += 1;
+    if (keys.left) dx -= 1;
+    if (keys.right) dx += 1;
 
-  if (dx !== 0 || dz !== 0) {
-    const length = Math.hypot(dx, dz);
-    dx /= length; dz /= length;
-    const step = MOVE_SPEED * delta;
-    controls.moveRight(dx * step);
-    controls.moveForward(-dz * step);
-    resolveCollisions();
+    if (dx !== 0 || dz !== 0) {
+      const length = Math.hypot(dx, dz);
+      dx /= length; dz /= length;
+
+      // stessa rotazione usata nel ramo aereo: cosi' la velocità che
+      // "portiamo con noi" in un eventuale salto punta esattamente nella
+      // direzione in cui si stava camminando, vista dalla camera
+      const moveDirection = new THREE.Vector3(dx, 0, dz).applyQuaternion(camera.quaternion);
+      moveDirection.y = 0;
+      moveDirection.normalize();
+
+      velocityX = moveDirection.x * MOVE_SPEED;
+      velocityZ = moveDirection.z * MOVE_SPEED;
+
+      const step = MOVE_SPEED * delta;
+      controls.moveRight(dx * step);
+      controls.moveForward(-dz * step);
+    } else {
+      // fermo a terra: nessuna inerzia da portare in un eventuale salto
+      velocityX = 0;
+      velocityZ = 0;
+    }
+  } else {
+    let inputX = 0, inputZ = 0;
+    if (keys.forward) inputZ -= 1;
+    if (keys.backward) inputZ += 1;
+    if (keys.left) inputX -= 1;
+    if (keys.right) inputX += 1;
+
+    if (inputX !== 0 || inputZ !== 0) {
+      const length = Math.hypot(inputX, inputZ);
+      inputX /= length; inputZ /= length;
+
+      const moveDirection = new THREE.Vector3(inputX, 0, inputZ).applyQuaternion(camera.quaternion);
+      moveDirection.y = 0;
+      moveDirection.normalize();
+
+      velocityX += moveDirection.x * ACCELERATION * delta;
+      velocityZ += moveDirection.z * ACCELERATION * delta;
+    }
+
+    const speed = Math.hypot(velocityX, velocityZ);
+    if (speed > 0) {
+      const newSpeed = Math.max(0, speed - FRICTION * delta);
+      const scale = newSpeed / speed;
+      velocityX *= scale;
+      velocityZ *= scale;
+    }
+
+    const currentSpeed = Math.hypot(velocityX, velocityZ);
+    if (currentSpeed > MOVE_SPEED) {
+      const scale = MOVE_SPEED / currentSpeed;
+      velocityX *= scale;
+      velocityZ *= scale;
+    }
+
+    camera.position.x += velocityX * delta;
+    camera.position.z += velocityZ * delta;
   }
+
+  resolveHorizontalCollisions(camera.position.y - EYE_HEIGHT);
 }
 
 // ============================================================
@@ -380,18 +754,15 @@ async function connectToServer() {
   socket.onmessage = async (event) => {
     const message = JSON.parse(event.data);
 
-    if (message.type === "full") {
-      hud.textContent = "Server pieno (5 giocatori).";
-      socket.close();
-      return;
-    }
-
     if (message.type === "welcome") {
       mySlot = message.your_slot;
       camera.position.set(message.spawn_x, EYE_HEIGHT, message.spawn_z);
+      updateHealthBar(MAX_HP);
+      myHp = MAX_HP;
       for (const p of message.players) {
-        addRemotePlayer(p.slot, p.x, p.z, p.yaw);
+        addRemotePlayer(p.slot, p.x, p.z, eyeHeightToGroundOffset(p.y), p.yaw, p.pitch || 0);
         attachBodyMaterial(p.slot);
+        if (p.hp !== undefined) remotePlayers[p.slot].hp = p.hp;
       }
       hud.textContent = `Slot ${mySlot + 1} - richiedo il microfono...`;
       await startMicrophone();
@@ -400,7 +771,7 @@ async function connectToServer() {
     }
 
     if (message.type === "player_connected") {
-      addRemotePlayer(message.slot, message.x, message.z, message.yaw);
+      addRemotePlayer(message.slot, message.x, message.z, eyeHeightToGroundOffset(message.y), message.yaw, message.pitch || 0);
       attachBodyMaterial(message.slot);
       return;
     }
@@ -408,15 +779,72 @@ async function connectToServer() {
     if (message.type === "player_disconnected") { removeRemotePlayer(message.slot); return; }
 
     if (message.type === "player_position") {
-      updateRemotePlayer(message.slot, message.x, message.z, message.yaw);
+      updateRemotePlayer(message.slot, message.x, message.z, eyeHeightToGroundOffset(message.y), message.yaw, message.pitch);
       return;
     }
 
     if (message.type === "spell") {
       const anchor = getEffectAnchor(message.slot);
-      const effect = SPELL_EFFECTS[message.word];
-      if (anchor && effect) effect(anchor);
       if (message.slot === mySlot) lastLocalCast[message.word] = performance.now();
+      if (!anchor) return;
+
+      const { yaw, pitch } = getCasterOrientation(message.slot);
+      const forward = forwardVector(yaw, pitch);
+
+      if (message.word === "fulmine") {
+        const targetAnchor = (message.target !== null && message.target !== undefined) ? getEffectAnchor(message.target) : null;
+        castLightning(anchor, forward, targetAnchor);
+      } else if (message.word === "fuoco") {
+        const material = getBodyMaterial(anchor);
+        if (material) { material.emissive.set(SPELL_COLORS.fuoco); material.emissiveIntensity = 1.6; }
+
+        const origin = new THREE.Vector3(message.origin.x, message.origin.y, message.origin.z);
+        const fireForward = forwardVector(message.yaw, message.pitch);
+        castFire(origin, fireForward, (message.duration || FIRE_DURATION_S) * 1000);
+      } else if (message.word === "scudo") {
+        castShield(anchor);
+      }
+    }
+
+    if (message.type === "health_update") {
+      if (message.slot === mySlot) {
+        if (message.hp < myHp) {
+          flashDamageVignette(myHp - message.hp);
+        }
+        myHp = message.hp;
+        updateHealthBar(message.hp);
+      } else if (remotePlayers[message.slot]) {
+        remotePlayers[message.slot].hp = message.hp;
+        flashDamage(remotePlayers[message.slot]);
+      }
+      return;
+    }
+
+    if (message.type === "player_down") {
+      if (message.slot === mySlot) {
+        hud.textContent = "Sei stato sconfitto... aspetta il respawn";
+      } else if (remotePlayers[message.slot]) {
+        remotePlayers[message.slot].group.visible = false;
+      }
+      return;
+    }
+
+    if (message.type === "player_respawn") {
+      if (message.slot === mySlot) {
+        camera.position.set(message.x, EYE_HEIGHT, message.z);
+        updateHealthBar(message.hp);
+        myHp = message.hp;
+        hud.textContent = `Slot ${mySlot + 1} - in ascolto`;
+      } else if (remotePlayers[message.slot]) {
+        const player = remotePlayers[message.slot];
+        const groundY = eyeHeightToGroundOffset(message.y);
+        player.group.position.set(message.x, groundY, message.z);
+        player.targetX = message.x;
+        player.targetZ = message.z;
+        player.targetGroundY = groundY;
+        player.hp = message.hp;
+        player.group.visible = true;
+      }
       return;
     }
   };
@@ -448,8 +876,10 @@ function sendPositionIfDue() {
   socket.send(JSON.stringify({
     type: "position",
     x: camera.position.x,
+    y: camera.position.y,
     z: camera.position.z,
     yaw: camera.rotation.y,
+    pitch: camera.rotation.x,
   }));
 }
 
@@ -470,16 +900,23 @@ function animate() {
   lastFrameTime = now;
 
   updateMovement(delta);
+  updateVerticalMovement(delta);
   sendPositionIfDue();
 
   // ancora locale: segue la camera, ma un po' piu' in basso (altezza corpo, non occhi)
-  localAnchor.position.set(camera.position.x, BODY_HEIGHT, camera.position.z);
+  localAnchor.position.set(
+    camera.position.x,
+    camera.position.y - (EYE_HEIGHT - BODY_HEIGHT),
+    camera.position.z
+  );
 
   for (const slot in remotePlayers) {
     const player = remotePlayers[slot];
     player.group.position.x += (player.targetX - player.group.position.x) * REMOTE_LERP_FACTOR;
+    player.group.position.y += (player.targetGroundY - player.group.position.y) * REMOTE_LERP_FACTOR;
     player.group.position.z += (player.targetZ - player.group.position.z) * REMOTE_LERP_FACTOR;
-    player.group.rotation.y += (player.targetYaw - player.group.rotation.y) * REMOTE_LERP_FACTOR;
+    player.head.rotation.x += shortestAngleDelta(player.head.rotation.x, player.targetPitch) * REMOTE_LERP_FACTOR;
+    player.group.rotation.y += shortestAngleDelta(player.group.rotation.y, player.targetYaw) * REMOTE_LERP_FACTOR;
 
     player.bodyMaterial.emissiveIntensity += (0 - player.bodyMaterial.emissiveIntensity) * 0.04;
 
