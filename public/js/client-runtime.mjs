@@ -7,6 +7,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   const ACCELERATION = 20.0;
   const FRICTION = 10.0;
   const BODY_HEIGHT = 0.5;
+  const BODY_RADIUS = 0.5;
   const EYE_HEIGHT = BODY_HEIGHT + 0.3;
   const GRAVITY = 18.0;
   const JUMP_SPEED = 13.0;
@@ -630,10 +631,11 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
 
   const RAY_TOP = 200;
 
-  function rayDownHeightOnBox(o, x, z) {
-    const rayOriginWorld = new THREE.Vector3(x, RAY_TOP, z);
+  function rayVerticalHeightOnBox(o, x, z, direction, originY) {
+    const rayOriginWorld = new THREE.Vector3(x, originY, z);
     const localOrigin = toLocalPoint(o, rayOriginWorld);
-    const localDir = toLocalDirection(o, new THREE.Vector3(0, -1, 0));
+    const worldDirection = new THREE.Vector3(0, direction, 0);
+    const localDir = toLocalDirection(o, worldDirection);
 
     const mins = [-o.halfWidth, -o.halfHeight, -o.halfDepth];
     const maxs = [o.halfWidth, o.halfHeight, o.halfDepth];
@@ -655,13 +657,25 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     }
     if (tMax < 0) return null;
     const tHit = tMin >= 0 ? tMin : tMax;
-    return rayOriginWorld.y - tHit;
+    return rayOriginWorld.y + tHit * direction;
+  }
+
+  function rayDownHeightOnBox(o, x, z) {
+    return rayVerticalHeightOnBox(o, x, z, -1, RAY_TOP);
+  }
+
+  function rayUpHeightOnBox(o, x, z) {
+    return rayVerticalHeightOnBox(o, x, z, 1, -RAY_TOP);
   }
 
   function rayDownHeightOnCylinder(o, x, z) {
-    const rayOriginWorld = new THREE.Vector3(x, RAY_TOP, z);
+    return rayVerticalHeightOnCylinder(o, x, z, -1, RAY_TOP);
+  }
+
+  function rayVerticalHeightOnCylinder(o, x, z, direction, originY) {
+    const rayOriginWorld = new THREE.Vector3(x, originY, z);
     const O = toLocalPoint(o, rayOriginWorld);
-    const D = toLocalDirection(o, new THREE.Vector3(0, -1, 0));
+    const D = toLocalDirection(o, new THREE.Vector3(0, direction, 0));
     const r = o.radius, hh = o.halfHeight;
     let bestT = null;
 
@@ -690,7 +704,11 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     }
 
     if (bestT === null) return null;
-    return rayOriginWorld.y - bestT;
+    return rayOriginWorld.y + bestT * direction;
+  }
+
+  function rayUpHeightOnCylinder(o, x, z) {
+    return rayVerticalHeightOnCylinder(o, x, z, 1, -RAY_TOP);
   }
 
   function closestPointOnBoxLocal(o, localPoint) {
@@ -723,23 +741,70 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     camera.position.z = closestWorld.z + horizontal.y * factor;
   }
 
+  function applyBoxHorizontalPush(o, localPoint) {
+    const verticalDistance = Math.max(0, Math.abs(localPoint.y) - o.halfHeight);
+    if (verticalDistance >= BODY_RADIUS) return;
+
+    const penetrationX = o.halfWidth + PLAYER_RADIUS - Math.abs(localPoint.x);
+    const penetrationZ = o.halfDepth + PLAYER_RADIUS - Math.abs(localPoint.z);
+    if (penetrationX <= 0 || penetrationZ <= 0) return;
+
+    const pushLocal = localPoint.clone();
+    if (penetrationX < penetrationZ) {
+      pushLocal.x = Math.sign(localPoint.x || 1) * (o.halfWidth + PLAYER_RADIUS);
+    } else {
+      pushLocal.z = Math.sign(localPoint.z || 1) * (o.halfDepth + PLAYER_RADIUS);
+    }
+    const pushWorld = toWorldPoint(o, pushLocal);
+    camera.position.x = pushWorld.x;
+    camera.position.z = pushWorld.z;
+  }
+
   function resolveBoxCollision(o, feetHeight) {
     const surfaceY = rayDownHeightOnBox(o, camera.position.x, camera.position.z);
     if (surfaceY !== null && feetHeight >= surfaceY - 0.05) return;
     if (o.topY !== undefined && feetHeight >= o.topY - 0.05) return;
 
-    const localPoint = toLocalPoint(o, camera.position);
-    const closestWorld = toWorldPoint(o, closestPointOnBoxLocal(o, localPoint));
-    applySpherePush(camera.position, closestWorld);
+    const undersideY = rayUpHeightOnBox(o, camera.position.x, camera.position.z);
+    const bodyTop = feetHeight + BODY_HEIGHT + BODY_RADIUS;
+    if (undersideY !== null && feetHeight < undersideY && bodyTop >= undersideY - 0.05) return;
+
+    if (verticalVelocity <= 0 && surfaceY !== null
+      && feetHeight + BODY_HEIGHT + BODY_RADIUS >= surfaceY) return;
+
+    const bodyCenter = camera.position.clone();
+    bodyCenter.y -= EYE_HEIGHT - BODY_HEIGHT;
+    const localPoint = toLocalPoint(o, bodyCenter);
+    applyBoxHorizontalPush(o, localPoint);
   }
 
   function resolveCylinderCollision(o, feetHeight) {
     const surfaceY = rayDownHeightOnCylinder(o, camera.position.x, camera.position.z);
     if (surfaceY !== null && feetHeight >= surfaceY - 0.05) return;
 
-    const localPoint = toLocalPoint(o, camera.position);
-    const closestWorld = toWorldPoint(o, closestPointOnCylinderLocal(o, localPoint));
-    applySpherePush(camera.position, closestWorld);
+    const undersideY = rayUpHeightOnCylinder(o, camera.position.x, camera.position.z);
+    const bodyTop = feetHeight + BODY_HEIGHT + BODY_RADIUS;
+    if (undersideY !== null && feetHeight < undersideY && bodyTop >= undersideY - 0.05) return;
+
+    const bodyCenter = camera.position.clone();
+    bodyCenter.y -= EYE_HEIGHT - BODY_HEIGHT;
+    const localPoint = toLocalPoint(o, bodyCenter);
+    const verticalDistance = Math.max(0, Math.abs(localPoint.y) - o.halfHeight);
+    if (verticalDistance >= BODY_RADIUS) return;
+
+    const horizontalDistance = Math.hypot(localPoint.x, localPoint.z);
+    const minimumDistance = o.radius + PLAYER_RADIUS;
+    if (horizontalDistance >= minimumDistance) return;
+
+    const pushDirection = horizontalDistance > 0.0001
+      ? new THREE.Vector2(localPoint.x, localPoint.z).normalize()
+      : new THREE.Vector2(1, 0);
+    const pushLocal = localPoint.clone();
+    pushLocal.x = pushDirection.x * minimumDistance;
+    pushLocal.z = pushDirection.y * minimumDistance;
+    const pushWorld = toWorldPoint(o, pushLocal);
+    camera.position.x = pushWorld.x;
+    camera.position.z = pushWorld.z;
   }
 
   function resolveCircleCollision(o) {
@@ -775,11 +840,43 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   function updateVerticalMovement(delta) {
     if (!controls.isLocked) return;
 
+    const previousFeetHeight = camera.position.y - EYE_HEIGHT;
     verticalVelocity -= GRAVITY * delta;
     camera.position.y += verticalVelocity * delta;
 
-    const groundHeight = groundHeightAt(camera.position.x, camera.position.z);
-    const minCameraY = groundHeight + EYE_HEIGHT;
+    const currentFeetHeight = camera.position.y - EYE_HEIGHT;
+    if (verticalVelocity > 0) {
+      for (const o of obstacles) {
+        const resolver = o.type === 'box' ? rayUpHeightOnBox : rayUpHeightOnCylinder;
+        if (!resolver) continue;
+        const undersideY = resolver(o, camera.position.x, camera.position.z);
+        const previousBodyTop = previousFeetHeight + BODY_HEIGHT + BODY_RADIUS;
+        const currentBodyTop = currentFeetHeight + BODY_HEIGHT + BODY_RADIUS;
+        if (undersideY !== null && previousBodyTop <= undersideY + 0.05
+          && currentBodyTop >= undersideY) {
+          camera.position.y = undersideY + EYE_HEIGHT - BODY_HEIGHT - BODY_RADIUS;
+          verticalVelocity = 0;
+          break;
+        }
+      }
+    }
+
+    let supportHeight = terrainHeightAt(camera.position.x, camera.position.z);
+    if (verticalVelocity <= 0) {
+      for (const o of obstacles) {
+        const resolver = SURFACE_HEIGHT_RESOLVERS[o.type];
+        if (!resolver) continue;
+        const surfaceY = resolver(o, camera.position.x, camera.position.z);
+        if (surfaceY === null) continue;
+        const landedOnSurface = previousFeetHeight >= surfaceY - 0.05
+          && currentFeetHeight <= surfaceY;
+        const alreadyOnSurface = currentFeetHeight >= surfaceY - 0.05;
+        if ((landedOnSurface || alreadyOnSurface) && surfaceY > supportHeight) {
+          supportHeight = surfaceY;
+        }
+      }
+    }
+    const minCameraY = supportHeight + EYE_HEIGHT;
 
     if (camera.position.y <= minCameraY) {
       camera.position.y = minCameraY;
