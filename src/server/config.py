@@ -23,7 +23,7 @@ players = {}
 # Terrain settings must match the generated map and browser interpolation.
 TERRAIN_SIZE = 180.0
 TERRAIN_RESOLUTION = 65
-WORLD_MAP_PATH = "world_map.json"
+WORLD_MAP_PATH = "world_map_2.json"
 
 MAX_HP = 100
 RESPAWN_DELAY_S = 3.0

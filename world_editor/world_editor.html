@@ -1,0 +1,1415 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carmina — Editor mappe 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+<style>
+  :root{
+    --bg: #12151a;
+    --panel: #171b21;
+    --panel-alt: #1d222a;
+    --border: #2a303b;
+    --border-soft: #232833;
+    --gold: #c9a15a;
+    --gold-dim: #8f7442;
+    --gold-wash: rgba(201,161,90,0.12);
+    --teal: #5fa9a3;
+    --teal-wash: rgba(95,169,163,0.14);
+    --text: #e9e5da;
+    --text-muted: #8b909c;
+    --text-faint: #565c68;
+    --danger: #c4695a;
+    --danger-wash: rgba(196,105,90,0.14);
+    --radius: 3px;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ height:100%; margin:0; }
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+  }
+  .display{ font-family: 'Fraunces', serif; }
+
+  button{ font-family: inherit; }
+  input, select{ font-family: inherit; color: inherit; }
+
+  /* ---------- layout ---------- */
+  #app{
+    display: grid;
+    grid-template-columns: 244px 1fr 288px;
+    grid-template-rows: 52px 1fr 26px;
+    grid-template-areas:
+      "top top top"
+      "left canvas right"
+      "left status right";
+    height: 100vh;
+    width: 100vw;
+    min-width: 920px;
+  }
+
+  /* ---------- top bar ---------- */
+  #topbar{
+    grid-area: top;
+    display:flex;
+    align-items:center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand{ display:flex; align-items:baseline; gap:9px; }
+  .brand .title{ font-family:'Fraunces', serif; font-size: 19px; font-weight:600; color: var(--gold); letter-spacing: 0.01em; }
+  .brand .sub{ font-size: 12px; color: var(--text-muted); }
+  .top-actions{ display:flex; align-items:center; gap:6px; }
+  .top-actions .divider{ width:1px; height:20px; background:var(--border); margin:0 6px; }
+
+  .ibtn{
+    display:flex; align-items:center; gap:6px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 12.5px;
+    transition: border-color .12s ease, background .12s ease, color .12s ease;
+  }
+  .ibtn:hover{ border-color: var(--gold-dim); color: var(--gold); }
+  .ibtn:active{ transform: translateY(1px); }
+  .ibtn svg{ width:14px; height:14px; flex-shrink:0; }
+  .ibtn.icon-only{ padding:6px; }
+  .ibtn:disabled{ opacity:0.35; cursor:default; pointer-events:none; }
+  .ibtn.primary{ border-color: var(--gold-dim); background: var(--gold-wash); color: var(--gold); }
+  .ibtn.primary:hover{ background: rgba(201,161,90,0.22); }
+  .ibtn.danger:hover{ border-color: var(--danger); color: var(--danger); }
+
+  /* ---------- side panels ---------- */
+  #left, #right{
+    background: var(--panel);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  #left{ grid-area: left; border-right: 1px solid var(--border); }
+  #right{ grid-area: right; border-left: 1px solid var(--border); display:flex; flex-direction:column; }
+
+  .panel-section{ padding: 14px 16px; border-bottom: 1px solid var(--border-soft); }
+  .panel-section h3{
+    margin: 0 0 11px 0;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+    padding-left: 9px;
+    border-left: 2px solid var(--gold-dim);
+    line-height:1.3;
+  }
+  .field-row{ display:flex; gap:8px; margin-bottom:8px; }
+  .field{ flex:1; min-width:0; }
+  .field label{ display:block; font-size:10.5px; color: var(--text-muted); margin-bottom:3px; }
+  .field input[type=number], .field input[type=text]{
+    width:100%;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 7px;
+    border-radius: var(--radius);
+    font-size: 12.5px;
+  }
+  .field input[type=number]:focus, .field input[type=text]:focus{ outline:none; border-color: var(--gold-dim); }
+  .field input[type=color]{
+    width:100%; height:28px; padding:2px;
+    background: var(--panel-alt); border:1px solid var(--border); border-radius: var(--radius); cursor:pointer;
+  }
+
+  .seg{ display:flex; border:1px solid var(--border); border-radius: var(--radius); overflow:hidden; }
+  .seg button{
+    flex:1; background: var(--panel-alt); color: var(--text-muted); border:none; border-right:1px solid var(--border);
+    padding:7px 4px; cursor:pointer; font-size:11px; display:flex; align-items:center; justify-content:center; gap:5px;
+  }
+  .seg button:last-child{ border-right:none; }
+  .seg button svg{ width:13px; height:13px; }
+  .seg button.active{ background: var(--gold-wash); color: var(--gold); }
+  .seg button:hover:not(.active){ color: var(--text); }
+
+  .slider-row{ margin-bottom:10px; }
+  .slider-row .lbl-row{ display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-muted); margin-bottom:4px; }
+  .slider-row .lbl-row span.val{ color: var(--text); }
+  input[type=range]{ width:100%; accent-color: var(--gold); height:15px; }
+
+  .obj-grid{ display:grid; grid-template-columns: repeat(3,1fr); gap:6px; margin-bottom:2px; }
+  .obj-btn{
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    background: var(--panel-alt); border:1px solid var(--border); border-radius: var(--radius);
+    padding: 9px 4px 7px; cursor:pointer; color: var(--text-muted);
+  }
+  .obj-btn svg{ width:19px; height:19px; }
+  .obj-btn span{ font-size:10px; }
+  .obj-btn:hover{ color: var(--text); border-color: var(--text-faint); }
+  .obj-btn.active{ color: var(--teal); border-color: var(--teal); background: var(--teal-wash); }
+
+  .select-tool-btn{
+    width:100%; display:flex; align-items:center; gap:8px; justify-content:center;
+    background: var(--panel-alt); border:1px solid var(--border); border-radius: var(--radius);
+    padding:9px; cursor:pointer; color: var(--text-muted); font-size:12px;
+  }
+  .select-tool-btn svg{ width:14px; height:14px; }
+  .select-tool-btn.active{ color: var(--gold); border-color: var(--gold-dim); background: var(--gold-wash); }
+  .select-tool-btn:hover:not(.active){ color: var(--text); }
+
+  .checkbox-row{ display:flex; align-items:center; gap:7px; margin: 10px 0 4px; cursor:pointer; user-select:none; }
+  .checkbox-row input{ accent-color: var(--gold); width:14px; height:14px; }
+  .checkbox-row span{ font-size:11.5px; color: var(--text-muted); }
+
+  .btn-block{
+    width:100%; background: var(--panel-alt); border:1px solid var(--border); color: var(--text-muted);
+    padding:8px; border-radius: var(--radius); cursor:pointer; font-size:11.5px; display:flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .btn-block:hover{ color: var(--text); border-color: var(--text-faint); }
+  .btn-block svg{ width:13px; height:13px; }
+
+  .hint{ font-size: 10.5px; color: var(--text-faint); line-height:1.5; margin-top:8px; }
+
+  /* ---------- canvas / viewport ---------- */
+  #canvas-wrap{ grid-area: canvas; position:relative; background:#0d1015; }
+  #three-canvas{ display:block; width:100%; height:100%; cursor: grab; }
+  #three-canvas.tool-sculpt{ cursor: crosshair; }
+  #three-canvas.tool-place{ cursor: copy; }
+  #three-canvas.orbiting{ cursor: grabbing; }
+
+  #status{
+    grid-area: status;
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 0 14px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    font-size: 10.5px;
+    color: var(--text-faint);
+  }
+  #status .mode-tag{ color: var(--gold); }
+  #status .legend{ display:flex; gap:14px; }
+
+  /* ---------- inspector ---------- */
+  #inspector-wrap{ flex:1; display:flex; flex-direction:column; min-height:0; }
+  .empty-state{ padding: 26px 18px; text-align:center; }
+  .empty-state p{ color: var(--text-faint); font-size:12px; line-height:1.6; margin:0; }
+
+  .type-tag{
+    display:inline-flex; align-items:center; gap:6px; font-size:11px; color: var(--teal);
+    background: var(--teal-wash); border:1px solid rgba(95,169,163,0.35); padding:3px 8px; border-radius: var(--radius);
+    margin-bottom: 12px;
+  }
+  .type-tag svg{ width:12px; height:12px; }
+
+  #obj-list{ flex:1; overflow-y:auto; padding: 6px 10px 14px; }
+  .obj-list-header{ display:flex; justify-content:space-between; align-items:baseline; padding: 12px 16px 4px; }
+  .obj-list-header h3{ margin:0; font-size:12.5px; font-weight:500; padding-left:9px; border-left:2px solid var(--gold-dim); }
+  .obj-list-header .count{ font-size:10.5px; color: var(--text-faint); }
+  .obj-row{
+    display:flex; align-items:center; gap:8px;
+    padding: 7px 8px; border-radius: var(--radius); cursor:pointer; margin-bottom:2px;
+    border: 1px solid transparent;
+  }
+  .obj-row:hover{ background: var(--panel-alt); }
+  .obj-row.active{ background: var(--gold-wash); border-color: var(--gold-dim); }
+  .obj-row svg{ width:14px; height:14px; color: var(--text-muted); flex-shrink:0; }
+  .obj-row.active svg{ color: var(--gold); }
+  .obj-row .obj-name{ flex:1; min-width:0; }
+  .obj-row .obj-name .t{ font-size:11.5px; color:var(--text); }
+  .obj-row .obj-name .c{ font-size:9.5px; color: var(--text-faint); }
+  .obj-row .row-del{ opacity:0; background:none; border:none; color: var(--text-faint); cursor:pointer; padding:3px; }
+  .obj-row:hover .row-del{ opacity:1; }
+  .obj-row .row-del:hover{ color: var(--danger); }
+  .obj-row .row-del svg{ width:12px; height:12px; }
+  .list-empty{ padding: 10px 16px 4px; font-size:11px; color: var(--text-faint); line-height:1.6; }
+
+  /* ---------- modals ---------- */
+  .modal-veil{
+    position:fixed; inset:0; background: rgba(8,10,13,0.72);
+    display:flex; align-items:center; justify-content:center; z-index:50;
+  }
+  .modal{
+    background: var(--panel); border:1px solid var(--border); border-radius: var(--radius);
+    width: 480px; max-width: 92vw; max-height: 82vh; display:flex; flex-direction:column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal-head{ display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; border-bottom:1px solid var(--border-soft); }
+  .modal-head h2{ margin:0; font-family:'Fraunces',serif; font-size:16px; font-weight:600; color: var(--gold); }
+  .modal-close{ background:none; border:none; color: var(--text-muted); cursor:pointer; padding:4px; }
+  .modal-close svg{ width:15px; height:15px; }
+  .modal-body{ padding: 16px 18px; overflow-y:auto; }
+  .modal-body p{ font-size:12.5px; color: var(--text-muted); line-height:1.6; margin: 0 0 12px; }
+  .modal-foot{ display:flex; justify-content:flex-end; gap:8px; padding: 14px 18px; border-top:1px solid var(--border-soft); }
+  textarea.json-area{
+    width:100%; height: 260px; background: var(--panel-alt); border:1px solid var(--border); color: var(--text);
+    font-family: 'Space Grotesk', monospace; font-size:11.5px; padding:10px; border-radius: var(--radius); resize:vertical;
+  }
+  .error-text{ color: var(--danger); font-size:11.5px; margin-top:8px; }
+  .file-drop{
+    border:1px dashed var(--border); border-radius: var(--radius); padding: 10px; text-align:center;
+    font-size:11.5px; color: var(--text-faint); margin-bottom:10px; cursor:pointer;
+  }
+  .file-drop:hover{ border-color: var(--gold-dim); color: var(--text-muted); }
+
+  ::-webkit-scrollbar{ width:9px; height:9px; }
+  ::-webkit-scrollbar-track{ background: transparent; }
+  ::-webkit-scrollbar-thumb{ background: var(--border); border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover{ background: var(--text-faint); }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <div id="topbar">
+    <div class="brand">
+      <span class="title">Carmina</span>
+      <span class="sub">Editor mappe 3D</span>
+    </div>
+    <div class="top-actions">
+      <button class="ibtn icon-only" id="btn-undo" title="Annulla (Ctrl+Z)"></button>
+      <button class="ibtn icon-only" id="btn-redo" title="Ripeti (Ctrl+Shift+Z)"></button>
+      <div class="divider"></div>
+      <button class="ibtn" id="btn-new"></button>
+      <button class="ibtn" id="btn-import"></button>
+      <button class="ibtn primary" id="btn-export"></button>
+    </div>
+  </div>
+
+  <div id="left">
+    <div class="panel-section">
+      <button class="select-tool-btn active" id="tool-select" data-tool="select"></button>
+    </div>
+
+    <div class="panel-section">
+      <h3>Terreno</h3>
+      <div class="field-row">
+        <div class="field">
+          <label for="in-size">Dimensione</label>
+          <input type="number" id="in-size" min="20" max="800" step="10">
+        </div>
+        <div class="field">
+          <label for="in-res">Risoluzione</label>
+          <input type="number" id="in-res" min="9" max="161" step="4">
+        </div>
+      </div>
+
+      <div class="seg" id="sculpt-seg" style="margin-bottom:10px;">
+        <button data-tool="sculpt-raise"></button>
+        <button data-tool="sculpt-lower"></button>
+        <button data-tool="sculpt-smooth"></button>
+      </div>
+
+      <div class="slider-row">
+        <div class="lbl-row"><span>Raggio pennello</span><span class="val" id="val-radius">14</span></div>
+        <input type="range" id="in-radius" min="2" max="60" step="1" value="14">
+      </div>
+      <div class="slider-row">
+        <div class="lbl-row"><span>Intensità</span><span class="val" id="val-strength">5</span></div>
+        <input type="range" id="in-strength" min="1" max="10" step="1" value="5">
+      </div>
+
+      <button class="btn-block" id="btn-reset-terrain"></button>
+    </div>
+
+    <div class="panel-section" id="objects-section">
+      <h3>Oggetti</h3>
+      <div class="obj-grid" id="obj-palette"></div>
+
+      <div id="new-obj-settings" style="margin-top:12px; display:none;">
+        <div class="field-row" id="new-dims-row"></div>
+        <div class="field" id="new-color-field">
+          <label>Colore</label>
+          <input type="color" id="new-color">
+        </div>
+        <label class="checkbox-row">
+          <input type="checkbox" id="new-elevated">
+          <span>Posizionamento elevato</span>
+        </label>
+        <div class="field" id="new-elevation-field" style="display:none;">
+          <label>Altezza (y)</label>
+          <input type="number" id="new-elevation" step="0.5" value="10">
+        </div>
+      </div>
+      <p class="hint">La y viene calcolata dal terreno nel punto in cui clicchi. Attiva il posizionamento elevato per strutture sospese, come piattaforme in volo.</p>
+    </div>
+  </div>
+
+  <div id="canvas-wrap">
+    <canvas id="three-canvas"></canvas>
+  </div>
+
+  <div id="right">
+    <div id="inspector-wrap">
+      <div class="panel-section" id="inspector-section" style="border-bottom: 1px solid var(--border-soft);">
+        <h3>Oggetto selezionato</h3>
+        <div id="inspector-body">
+          <div class="empty-state">
+            <p>Seleziona un oggetto nella scena, oppure posizionane uno nuovo dal pannello a sinistra.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="obj-list-header">
+      <h3>Elenco oggetti</h3>
+      <span class="count" id="obj-count">0</span>
+    </div>
+    <div id="obj-list"></div>
+  </div>
+
+  <div id="status">
+    <div>Modalità: <span class="mode-tag" id="status-mode">Seleziona / naviga</span></div>
+    <div class="legend">
+      <span>Tasto destro: ruota</span>
+      <span>Rotella: zoom</span>
+      <span>Maiusc + trascina: sposta vista</span>
+    </div>
+  </div>
+
+</div>
+
+<div id="modal-root"></div>
+
+<script>
+/* =========================================================================
+   ICONS — minimal inline SVGs, stroke-based, currentColor
+   ========================================================================= */
+const ICONS = {
+  select: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 7-6 2-2 6z"/></svg>',
+  raise: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M6 11l6-6 6 6"/></svg>',
+  lower: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13M6 13l6 6 6-6"/></svg>',
+  smooth: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15c2-6 4-6 5.5-2s3.5 4 5.5-2 4-6 6.5-2"/></svg>',
+  tree: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 3l4.5 6.5h-2.4L18.5 15h-2.6L18 19H6l2.1-4H5.5l4.4-5.5H7.5z"/><path d="M12 19v2.4" stroke-linecap="round"/></svg>',
+  building: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17"/><path d="M9 8h1.4M13.6 8H15M9 12h1.4M13.6 12h1.5M9 16h1.4M13.6 16H15" stroke-linecap="round"/></svg>',
+  platform: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3 9l4-4h14v6H7z"/><path d="M7 15v-4M21 15v-4M4 19h4M16 19h4" stroke-linecap="round"/></svg>',
+  column: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 4h8M8 20h8" stroke-linecap="round"/><path d="M9.5 4c0 1-.5 1.6-.5 1.6v13c0 .6.5 1.4.5 1.4M14.5 4c0 1 .5 1.6.5 1.6v13c0 .6-.5 1.4-.5 1.4"/></svg>',
+  ramp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M4 19L18 6h2v13z"/></svg>',
+  undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 1 2.6 5.9M4 12V6M4 12h6"/></svg>',
+  redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 0-2.6 5.9M20 12V6M20 12h-6"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>',
+  newfile: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M11 12h4M13 10v4" stroke-linecap="round"/></svg>',
+  import: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M4 19h16"/></svg>',
+  export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M8 8l4-4 4 4M4 19h16"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  snap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11M8 10l4 4 4-4M4 20h16"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>',
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11M8 10l4 4 4-4M5 20h14"/></svg>',
+};
+const TYPE_LABEL = { tree:'Albero', building:'Edificio', platform:'Piattaforma', column:'Colonna', ramp:'Rampa' };
+
+/* =========================================================================
+   WORLD STATE
+   ========================================================================= */
+let world = null;      // { terrain:{size,resolution,heights}, objects:[{id,type,...}] }
+let selectedId = null;
+let idCounter = 1;
+let currentTool = 'select';
+
+const paletteDefaults = {
+  tree:      { color: 0x4f6b3f },
+  building:  { width:7, height:5, depth:7, color: 0x8d7f6b },
+  platform:  { width:8, height:0.8, depth:8, color: 0x7c8a95 },
+  column:    { radius:1, height:6, color: 0x9c8f7c, rotation:{x:0,y:0,z:0} },
+  ramp:      { width:8, height:1.2, depth:14, color: 0x8a6a4a, rotation:{x:0.3,y:0,z:0} },
+};
+let placeElevated = false;
+let placeElevation = 10;
+
+function makeDefaultWorld(){
+  const resolution = 65, size = 180;
+  const heights = generateNoiseHeights(resolution);
+  return { terrain: { size, resolution, heights }, objects: [] };
+}
+
+function generateNoiseHeights(resolution){
+  const coarseA = makeRandomGrid(6, 2.4);
+  const coarseB = makeRandomGrid(13, 1.0);
+  const heights = [];
+  for(let zi=0; zi<resolution; zi++){
+    const row = [];
+    for(let xi=0; xi<resolution; xi++){
+      const gx1 = xi/(resolution-1)*(coarseA.length-1);
+      const gz1 = zi/(resolution-1)*(coarseA.length-1);
+      const gx2 = xi/(resolution-1)*(coarseB.length-1);
+      const gz2 = zi/(resolution-1)*(coarseB.length-1);
+      let h = bilinearSample(coarseA, gx1, gz1, coarseA.length) + bilinearSample(coarseB, gx2, gz2, coarseB.length);
+      row.push(round3(h));
+    }
+    heights.push(row);
+  }
+  return heights;
+}
+function makeRandomGrid(n, amp){
+  const g = [];
+  for(let i=0;i<n;i++){ const row=[]; for(let j=0;j<n;j++){ row.push((Math.random()*2-1)*amp); } g.push(row); }
+  return g;
+}
+function bilinearSample(grid, gx, gz, res){
+  const x0=Math.floor(gx), x1=Math.min(x0+1,res-1);
+  const z0=Math.floor(gz), z1=Math.min(z0+1,res-1);
+  const tx=gx-x0, tz=gz-z0;
+  const h00=grid[z0][x0], h10=grid[z0][x1], h01=grid[z1][x0], h11=grid[z1][x1];
+  const h0=h00*(1-tx)+h10*tx, h1=h01*(1-tx)+h11*tx;
+  return h0*(1-tz)+h1*tz;
+}
+function resampleHeights(oldHeights, oldRes, newRes){
+  const out = [];
+  for(let zi=0; zi<newRes; zi++){
+    const row = [];
+    const oz = zi/(newRes-1)*(oldRes-1);
+    for(let xi=0; xi<newRes; xi++){
+      const ox = xi/(newRes-1)*(oldRes-1);
+      row.push(round3(bilinearSample(oldHeights, ox, oz, oldRes)));
+    }
+    out.push(row);
+  }
+  return out;
+}
+function terrainHeightAt(x, z){
+  const { size, resolution, heights } = world.terrain;
+  const half = size/2;
+  const gx = clamp((x+half)/size*(resolution-1), 0, resolution-1);
+  const gz = clamp((z+half)/size*(resolution-1), 0, resolution-1);
+  return bilinearSample(heights, gx, gz, resolution);
+}
+function clamp(v,a,b){ return Math.min(Math.max(v,a),b); }
+function round3(n){ return Math.round(n*1000)/1000; }
+function round2(n){ return Math.round(n*100)/100; }
+
+/* =========================================================================
+   THREE.JS SCENE
+   ========================================================================= */
+const canvas = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b232b);
+scene.fog = new THREE.Fog(0x1b232b, 140, 420);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
+const cameraTarget = new THREE.Vector3(0,4,0);
+let camSpherical = { radius: 150, theta: Math.PI*0.28, phi: Math.PI*0.32 };
+function updateCameraFromSpherical(){
+  camSpherical.phi = clamp(camSpherical.phi, 0.12, Math.PI/2 - 0.03);
+  camSpherical.radius = clamp(camSpherical.radius, 12, 620);
+  const r = camSpherical.radius, t = camSpherical.theta, p = camSpherical.phi;
+  camera.position.set(
+    cameraTarget.x + r*Math.sin(p)*Math.sin(t),
+    cameraTarget.y + r*Math.cos(p),
+    cameraTarget.z + r*Math.sin(p)*Math.cos(t)
+  );
+  camera.lookAt(cameraTarget);
+}
+updateCameraFromSpherical();
+
+const hemi = new THREE.HemisphereLight(0x9fb4c4, 0x2a2420, 0.65);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffe9c2, 1.15);
+sun.position.set(90, 130, 60);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left = -140; sun.shadow.camera.right = 140;
+sun.shadow.camera.top = 140; sun.shadow.camera.bottom = -140;
+sun.shadow.camera.near = 10; sun.shadow.camera.far = 400;
+sun.shadow.bias = -0.0015;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0x3a4048, 0.35));
+
+let terrainMesh = null;
+const objectsGroup = new THREE.Group();
+scene.add(objectsGroup);
+let selectionHelper = null;
+
+const raycaster = new THREE.Raycaster();
+const mouseNDC = new THREE.Vector2();
+
+/* ---------- terrain build / sculpt ---------- */
+function heightColor(y, out){
+  // gradient: sand -> grass -> rock -> snow
+  const stops = [
+    { h:-6,  c:[0.62,0.55,0.38] },
+    { h: 0,  c:[0.40,0.47,0.27] },
+    { h: 7,  c:[0.33,0.42,0.24] },
+    { h: 16, c:[0.46,0.43,0.38] },
+    { h: 28, c:[0.78,0.78,0.76] },
+  ];
+  if(y<=stops[0].h){ out.set(...stops[0].c); return out; }
+  for(let i=0;i<stops.length-1;i++){
+    if(y>=stops[i].h && y<=stops[i+1].h){
+      const t = (y-stops[i].h)/(stops[i+1].h-stops[i].h);
+      out.set(
+        stops[i].c[0]+(stops[i+1].c[0]-stops[i].c[0])*t,
+        stops[i].c[1]+(stops[i+1].c[1]-stops[i].c[1])*t,
+        stops[i].c[2]+(stops[i+1].c[2]-stops[i].c[2])*t
+      );
+      return out;
+    }
+  }
+  out.set(...stops[stops.length-1].c);
+  return out;
+}
+const _colorTmp = new THREE.Color();
+
+function buildTerrainGeometry(){
+  const { size, resolution, heights } = world.terrain;
+  const half = size/2;
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(resolution*resolution*3);
+  const colors = new Float32Array(resolution*resolution*3);
+  const uvs = new Float32Array(resolution*resolution*2);
+  let pi=0, ci=0, ui=0;
+  for(let zi=0; zi<resolution; zi++){
+    for(let xi=0; xi<resolution; xi++){
+      const x = -half + (xi/(resolution-1))*size;
+      const z = -half + (zi/(resolution-1))*size;
+      const y = heights[zi][xi];
+      positions[pi++]=x; positions[pi++]=y; positions[pi++]=z;
+      heightColor(y,_colorTmp);
+      colors[ci++]=_colorTmp.r; colors[ci++]=_colorTmp.g; colors[ci++]=_colorTmp.b;
+      uvs[ui++]=xi/(resolution-1); uvs[ui++]=zi/(resolution-1);
+    }
+  }
+  const indices = [];
+  for(let zi=0; zi<resolution-1; zi++){
+    for(let xi=0; xi<resolution-1; xi++){
+      const a = zi*resolution+xi, b=a+1, c=a+resolution, d=c+1;
+      indices.push(a,c,b, b,c,d);
+    }
+  }
+  geo.setIndex(indices);
+  geo.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs,2));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function rebuildTerrainMesh(){
+  if(terrainMesh){
+    scene.remove(terrainMesh);
+    terrainMesh.geometry.dispose();
+    terrainMesh.material.dispose();
+  }
+  const geo = buildTerrainGeometry();
+  const mat = new THREE.MeshStandardMaterial({ vertexColors:true, roughness:0.95, metalness:0.02, side: THREE.DoubleSide });
+  terrainMesh = new THREE.Mesh(geo, mat);
+  terrainMesh.receiveShadow = true;
+  terrainMesh.castShadow = false;
+  scene.add(terrainMesh);
+}
+
+function brushFalloff(dist, rad){
+  if(dist>=rad) return 0;
+  const t = 1 - dist/rad;
+  return t*t*(3-2*t);
+}
+function neighborAvg(heights, xi, zi, res){
+  let sum=0, n=0;
+  const deltas = [[1,0],[-1,0],[0,1],[0,-1]];
+  for(const [dx,dz] of deltas){
+    const nx=xi+dx, nz=zi+dz;
+    if(nx>=0 && nx<res && nz>=0 && nz<res){ sum+=heights[nz][nx]; n++; }
+  }
+  return n? sum/n : heights[zi][xi];
+}
+
+function applyBrush(point, mode){
+  const { size, resolution, heights } = world.terrain;
+  const half = size/2;
+  const cellSize = size/(resolution-1);
+  const gx = (point.x+half)/cellSize;
+  const gz = (point.z+half)/cellSize;
+  const radCells = Math.max(brushRadius/cellSize, 0.6);
+  const x0 = Math.max(0, Math.floor(gx-radCells));
+  const x1 = Math.min(resolution-1, Math.ceil(gx+radCells));
+  const z0 = Math.max(0, Math.floor(gz-radCells));
+  const z1 = Math.min(resolution-1, Math.ceil(gz+radCells));
+  const posAttr = terrainMesh.geometry.attributes.position;
+  const colAttr = terrainMesh.geometry.attributes.color;
+  for(let zi=z0; zi<=z1; zi++){
+    for(let xi=x0; xi<=x1; xi++){
+      const dx=xi-gx, dz=zi-gz;
+      const dist = Math.sqrt(dx*dx+dz*dz);
+      const f = brushFalloff(dist, radCells);
+      if(f<=0) continue;
+      let h = heights[zi][xi];
+      if(mode==='raise') h += brushStrength*f*0.14;
+      else if(mode==='lower') h -= brushStrength*f*0.14;
+      else if(mode==='smooth'){ const avg = neighborAvg(heights,xi,zi,resolution); h = h + (avg-h)*f*0.6; }
+      h = clamp(h, -30, 60);
+      heights[zi][xi] = h;
+      const idx = zi*resolution+xi;
+      posAttr.setY(idx, h);
+      heightColor(h, _colorTmp);
+      colAttr.setXYZ(idx, _colorTmp.r, _colorTmp.g, _colorTmp.b);
+    }
+  }
+  posAttr.needsUpdate = true;
+  colAttr.needsUpdate = true;
+  terrainMesh.geometry.computeVertexNormals();
+  terrainMesh.geometry.attributes.normal.needsUpdate = true;
+}
+
+/* ---------- object meshes ---------- */
+function colorFromInt(dec){ return new THREE.Color(dec); }
+
+function createObjectMesh(obj){
+  const group = new THREE.Group();
+  group.userData.objId = obj.id;
+  const baseY = obj.y;
+
+  if(obj.type === 'tree'){
+    const trunkMat = new THREE.MeshStandardMaterial({ color:0x5b4530, roughness:1 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: obj.color!==undefined? colorFromInt(obj.color) : 0x4f6b3f, roughness:0.95 });
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.3,1.6,7), trunkMat);
+    trunk.position.y = 0.8;
+    const c1 = new THREE.Mesh(new THREE.ConeGeometry(1.15,2.0,8), leafMat);
+    c1.position.y = 2.0;
+    const c2 = new THREE.Mesh(new THREE.ConeGeometry(0.9,1.7,8), leafMat);
+    c2.position.y = 3.1;
+    const c3 = new THREE.Mesh(new THREE.ConeGeometry(0.6,1.3,8), leafMat);
+    c3.position.y = 4.0;
+    [trunk,c1,c2,c3].forEach(m=>{ m.castShadow=true; m.receiveShadow=true; group.add(m); });
+    group.position.set(obj.x, baseY, obj.z);
+  }
+  else if(obj.type === 'building'){
+    const mat = new THREE.MeshStandardMaterial({ color: colorFromInt(obj.color), roughness:0.85 });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(obj.width,obj.height,obj.depth), mat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    group.add(mesh);
+    group.position.set(obj.x, baseY + obj.height/2, obj.z);
+  }
+  else if(obj.type === 'platform'){
+    const mat = new THREE.MeshStandardMaterial({ color: colorFromInt(obj.color), roughness:0.8 });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(obj.width,obj.height,obj.depth), mat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    group.add(mesh);
+    group.position.set(obj.x, baseY + obj.height/2, obj.z);
+  }
+  else if(obj.type === 'column'){
+    const mat = new THREE.MeshStandardMaterial({ color: colorFromInt(obj.color), roughness:0.7 });
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(obj.radius,obj.radius,obj.height,22), mat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    group.add(mesh);
+    group.position.set(obj.x, baseY + obj.height/2, obj.z);
+    group.rotation.set(obj.rotation.x, obj.rotation.y, obj.rotation.z);
+  }
+  else if(obj.type === 'ramp'){
+    const mat = new THREE.MeshStandardMaterial({ color: colorFromInt(obj.color), roughness:0.8 });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(obj.width,obj.height,obj.depth), mat);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    group.add(mesh);
+    group.position.set(obj.x, baseY + obj.height/2, obj.z);
+    group.rotation.set(obj.rotation.x, obj.rotation.y, obj.rotation.z);
+  }
+  return group;
+}
+
+function rebuildAllObjectMeshes(){
+  while(objectsGroup.children.length) objectsGroup.remove(objectsGroup.children[0]);
+  for(const obj of world.objects){ objectsGroup.add(createObjectMesh(obj)); }
+  refreshSelectionHelper();
+}
+function rebuildOneObjectMesh(obj){
+  const old = objectsGroup.children.find(c=>c.userData.objId===obj.id);
+  if(old) objectsGroup.remove(old);
+  objectsGroup.add(createObjectMesh(obj));
+  refreshSelectionHelper();
+}
+
+function refreshSelectionHelper(){
+  if(selectionHelper){ scene.remove(selectionHelper); selectionHelper=null; }
+  if(selectedId==null) return;
+  const g = objectsGroup.children.find(c=>c.userData.objId===selectedId);
+  if(!g) return;
+  const box = new THREE.Box3().setFromObject(g);
+  selectionHelper = new THREE.Box3Helper(box, new THREE.Color(0xc9a15a));
+  scene.add(selectionHelper);
+}
+
+/* ---------- camera controls (custom orbit) ---------- */
+let isOrbiting=false, isPanning=false, lastX=0, lastY=0;
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
+canvas.addEventListener('pointerdown', (e)=>{
+  if(e.button===2){
+    isOrbiting=true; lastX=e.clientX; lastY=e.clientY;
+    canvas.classList.add('orbiting'); canvas.setPointerCapture(e.pointerId);
+  } else if(e.button===0 && e.shiftKey){
+    isPanning=true; lastX=e.clientX; lastY=e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+  } else if(e.button===0){
+    handlePrimaryDown(e);
+    canvas.setPointerCapture(e.pointerId);
+  }
+});
+window.addEventListener('pointermove', (e)=>{
+  if(isOrbiting){
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    camSpherical.theta -= dx*0.006;
+    camSpherical.phi -= dy*0.006;
+    updateCameraFromSpherical();
+    lastX=e.clientX; lastY=e.clientY;
+  } else if(isPanning){
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    const panSpeed = camSpherical.radius*0.0016;
+    const right = new THREE.Vector3(); camera.getWorldDirection(right);
+    const camRight = new THREE.Vector3().crossVectors(camera.up, right).normalize();
+    cameraTarget.addScaledVector(camRight, dx*panSpeed);
+    cameraTarget.y += dy*panSpeed;
+    updateCameraFromSpherical();
+    lastX=e.clientX; lastY=e.clientY;
+  } else if(isSculpting){
+    handlePrimaryMove(e);
+  }
+});
+window.addEventListener('pointerup', (e)=>{
+  if(isOrbiting){ isOrbiting=false; canvas.classList.remove('orbiting'); }
+  if(isPanning){ isPanning=false; }
+  if(isSculpting){ isSculpting=false; pushUndoSnapshot(); }
+});
+canvas.addEventListener('wheel', (e)=>{
+  e.preventDefault();
+  camSpherical.radius *= (1 + Math.sign(e.deltaY)*0.09);
+  updateCameraFromSpherical();
+}, { passive:false });
+
+/* ---------- primary (left click) tool actions ---------- */
+let isSculpting=false;
+let brushRadius=14, brushStrength=5;
+
+function setMouseNDC(e){
+  const rect = canvas.getBoundingClientRect();
+  mouseNDC.x = ((e.clientX-rect.left)/rect.width)*2-1;
+  mouseNDC.y = -((e.clientY-rect.top)/rect.height)*2+1;
+}
+function raycastTerrain(e){
+  setMouseNDC(e);
+  raycaster.setFromCamera(mouseNDC, camera);
+  const hits = raycaster.intersectObject(terrainMesh, false);
+  return hits.length? hits[0].point : null;
+}
+function raycastObjects(e){
+  setMouseNDC(e);
+  raycaster.setFromCamera(mouseNDC, camera);
+  const hits = raycaster.intersectObjects(objectsGroup.children, true);
+  if(!hits.length) return null;
+  let o = hits[0].object;
+  while(o && o.userData.objId===undefined) o = o.parent;
+  return o ? o.userData.objId : null;
+}
+
+function handlePrimaryDown(e){
+  if(currentTool==='select'){
+    const id = raycastObjects(e);
+    selectObject(id);
+  } else if(currentTool.startsWith('sculpt-')){
+    const p = raycastTerrain(e);
+    if(p){ isSculpting=true; applyBrush(p, currentTool.replace('sculpt-','')); }
+  } else if(currentTool.startsWith('place-')){
+    const p = raycastTerrain(e);
+    if(p){ placeObject(currentTool.replace('place-',''), p); }
+  }
+}
+function handlePrimaryMove(e){
+  if(currentTool.startsWith('sculpt-')){
+    const p = raycastTerrain(e);
+    if(p) applyBrush(p, currentTool.replace('sculpt-',''));
+  }
+}
+
+/* =========================================================================
+   OBJECT CRUD
+   ========================================================================= */
+function placeObject(type, point){
+  const d = paletteDefaults[type];
+  const y = placeElevated ? placeElevation : round3(point.y);
+  const obj = { id: idCounter++, type, x: round2(point.x), y, z: round2(point.z) };
+  if(type==='tree'){ obj.color = d.color; }
+  if(type==='building' || type==='platform'){
+    obj.width=d.width; obj.height=d.height; obj.depth=d.depth; obj.color=d.color;
+  }
+  if(type==='column'){
+    obj.radius=d.radius; obj.height=d.height; obj.color=d.color;
+    obj.rotation = { x:d.rotation.x, y:d.rotation.y, z:d.rotation.z };
+  }
+  if(type==='ramp'){
+    obj.width=d.width; obj.height=d.height; obj.depth=d.depth; obj.color=d.color;
+    obj.rotation = { x:d.rotation.x, y:d.rotation.y, z:d.rotation.z };
+  }
+  world.objects.push(obj);
+  rebuildOneObjectMesh(obj);
+  renderObjList();
+  selectObject(obj.id);
+  pushUndoSnapshot();
+}
+function deleteObject(id){
+  const idx = world.objects.findIndex(o=>o.id===id);
+  if(idx===-1) return;
+  world.objects.splice(idx,1);
+  const g = objectsGroup.children.find(c=>c.userData.objId===id);
+  if(g) objectsGroup.remove(g);
+  if(selectedId===id) selectObject(null);
+  renderObjList();
+  pushUndoSnapshot();
+}
+function getObject(id){ return world.objects.find(o=>o.id===id); }
+
+function selectObject(id){
+  selectedId = id;
+  refreshSelectionHelper();
+  renderInspector();
+  renderObjList();
+}
+
+/* =========================================================================
+   INSPECTOR (right panel)
+   ========================================================================= */
+function renderInspector(){
+  const body = document.getElementById('inspector-body');
+  if(selectedId==null){
+    body.innerHTML = '<div class="empty-state"><p>Seleziona un oggetto nella scena, oppure posizionane uno nuovo dal pannello a sinistra.</p></div>';
+    return;
+  }
+  const obj = getObject(selectedId);
+  if(!obj){ selectObject(null); return; }
+
+  let html = `<div class="type-tag">${ICONS[obj.type]}<span>${TYPE_LABEL[obj.type]}</span></div>`;
+
+  html += fieldRow([
+    numField('x','X',obj.x,0.5), numField('y','Y',obj.y,0.5), numField('z','Z',obj.z,0.5)
+  ]);
+
+  if(obj.type==='building' || obj.type==='platform' || obj.type==='ramp'){
+    html += fieldRow([
+      numField('width','Larghezza',obj.width,0.5,0.2),
+      numField('height','Altezza',obj.height,0.5,0.1),
+      numField('depth','Profondità',obj.depth,0.5,0.2)
+    ]);
+  }
+  if(obj.type==='column'){
+    html += fieldRow([
+      numField('radius','Raggio',obj.radius,0.2,0.1),
+      numField('height','Altezza',obj.height,0.5,0.2)
+    ]);
+  }
+  if(obj.type==='column' || obj.type==='ramp'){
+    html += `<div class="field-row"><div class="field"><label>Rotazione (gradi)</label></div></div>`;
+    html += fieldRow([
+      numField('rotx','X', round2(obj.rotation.x*180/Math.PI), 1),
+      numField('roty','Y', round2(obj.rotation.y*180/Math.PI), 1),
+      numField('rotz','Z', round2(obj.rotation.z*180/Math.PI), 1)
+    ]);
+  }
+  if(obj.type!=='tree'){
+    html += `<div class="field" style="margin-bottom:10px;"><label>Colore</label><input type="color" id="f-color" value="${decToHex(obj.color)}"></div>`;
+  } else {
+    html += `<div class="field" style="margin-bottom:10px;"><label>Colore fogliame</label><input type="color" id="f-color" value="${decToHex(obj.color)}"></div>`;
+  }
+
+  html += `<button class="btn-block" id="btn-snap" style="margin-bottom:8px;">${ICONS.snap}<span>Aggancia y al terreno</span></button>`;
+  html += `<button class="btn-block" id="btn-delete-obj" style="color:var(--danger);border-color:var(--danger);">${ICONS.trash}<span>Elimina oggetto</span></button>`;
+
+  body.innerHTML = html;
+  wireInspectorEvents(obj);
+}
+function fieldRow(fields){ return `<div class="field-row">${fields.join('')}</div>`; }
+function numField(key,label,val,step,min){
+  return `<div class="field"><label>${label}</label><input type="number" data-key="${key}" step="${step}" ${min!==undefined?`min="${min}"`:''} value="${val}"></div>`;
+}
+function decToHex(dec){ return '#'+((dec>>>0).toString(16).padStart(6,'0')); }
+function hexToDec(hex){ return parseInt(hex.replace('#',''),16); }
+
+function wireInspectorEvents(obj){
+  document.querySelectorAll('#inspector-body input[type=number]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const key = inp.dataset.key;
+      const v = parseFloat(inp.value);
+      if(isNaN(v)) return;
+      if(key==='x'||key==='y'||key==='z'){ obj[key]=round3(v); }
+      else if(key==='width'||key==='height'||key==='depth'||key==='radius'){ obj[key]=Math.max(0.1,round3(v)); }
+      else if(key==='rotx'||key==='roty'||key==='rotz'){
+        const axis = key.slice(3);
+        obj.rotation[axis] = round3(v*Math.PI/180);
+      }
+      rebuildOneObjectMesh(obj);
+      selectObject(obj.id);
+      renderObjList();
+      pushUndoSnapshot();
+    });
+  });
+  const colorInp = document.getElementById('f-color');
+  if(colorInp){
+    colorInp.addEventListener('input', ()=>{
+      obj.color = hexToDec(colorInp.value);
+      rebuildOneObjectMesh(obj);
+    });
+    colorInp.addEventListener('change', ()=>{ pushUndoSnapshot(); });
+  }
+  const snapBtn = document.getElementById('btn-snap');
+  if(snapBtn) snapBtn.addEventListener('click', ()=>{
+    obj.y = round3(terrainHeightAt(obj.x, obj.z));
+    rebuildOneObjectMesh(obj);
+    renderInspector();
+    pushUndoSnapshot();
+  });
+  const delBtn = document.getElementById('btn-delete-obj');
+  if(delBtn) delBtn.addEventListener('click', ()=> deleteObject(obj.id));
+}
+
+/* =========================================================================
+   OBJECT LIST (right panel, bottom)
+   ========================================================================= */
+function renderObjList(){
+  const list = document.getElementById('obj-list');
+  document.getElementById('obj-count').textContent = world.objects.length;
+  if(world.objects.length===0){
+    list.innerHTML = '<div class="list-empty">Nessun oggetto ancora. Scegli un tipo dal pannello a sinistra e clicca sul terreno per posizionarlo.</div>';
+    return;
+  }
+  list.innerHTML = world.objects.map(o=>{
+    const active = o.id===selectedId ? 'active' : '';
+    return `<div class="obj-row ${active}" data-id="${o.id}">
+      ${ICONS[o.type]}
+      <div class="obj-name">
+        <div class="t">${TYPE_LABEL[o.type]}</div>
+        <div class="c">x ${o.x.toFixed(1)} · y ${o.y.toFixed(1)} · z ${o.z.toFixed(1)}</div>
+      </div>
+      <button class="row-del" data-id="${o.id}">${ICONS.trash}</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.obj-row').forEach(row=>{
+    row.addEventListener('click', (e)=>{
+      if(e.target.closest('.row-del')) return;
+      selectObject(parseInt(row.dataset.id));
+    });
+  });
+  list.querySelectorAll('.row-del').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{ e.stopPropagation(); deleteObject(parseInt(btn.dataset.id)); });
+  });
+}
+
+/* =========================================================================
+   TOOL SWITCHING / LEFT PANEL WIRING
+   ========================================================================= */
+const TOOL_STATUS_LABEL = {
+  'select':'Seleziona / naviga',
+  'sculpt-raise':'Scolpisci — alza',
+  'sculpt-lower':'Scolpisci — abbassa',
+  'sculpt-smooth':'Scolpisci — leviga',
+  'place-tree':'Posiziona — albero',
+  'place-building':'Posiziona — edificio',
+  'place-platform':'Posiziona — piattaforma',
+  'place-column':'Posiziona — colonna',
+  'place-ramp':'Posiziona — rampa',
+};
+
+function setTool(tool){
+  currentTool = tool;
+  document.getElementById('status-mode').textContent = TOOL_STATUS_LABEL[tool] || tool;
+
+  document.getElementById('tool-select').classList.toggle('active', tool==='select');
+  document.querySelectorAll('#sculpt-seg button').forEach(b=> b.classList.toggle('active', b.dataset.tool===tool));
+  document.querySelectorAll('.obj-btn').forEach(b=> b.classList.toggle('active', b.dataset.tool===tool));
+
+  canvas.classList.remove('tool-sculpt','tool-place');
+  if(tool.startsWith('sculpt-')) canvas.classList.add('tool-sculpt');
+  if(tool.startsWith('place-')) canvas.classList.add('tool-place');
+
+  const settingsPanel = document.getElementById('new-obj-settings');
+  if(tool.startsWith('place-')){
+    settingsPanel.style.display='block';
+    renderNewObjSettings(tool.replace('place-',''));
+  } else {
+    settingsPanel.style.display='none';
+  }
+}
+
+function renderNewObjSettings(type){
+  const d = paletteDefaults[type];
+  const dimsRow = document.getElementById('new-dims-row');
+  const colorField = document.getElementById('new-color-field');
+  dimsRow.innerHTML = '';
+  colorField.style.display = 'block';
+
+  if(type==='tree'){
+    colorField.querySelector('label').textContent = 'Colore fogliame';
+    document.getElementById('new-color').value = decToHex(d.color);
+  } else {
+    colorField.querySelector('label').textContent = 'Colore';
+    document.getElementById('new-color').value = decToHex(d.color);
+  }
+
+  if(type==='building' || type==='platform' || type==='ramp'){
+    dimsRow.innerHTML = `
+      <div class="field"><label>Larghezza</label><input type="number" id="d-width" step="0.5" min="0.2" value="${d.width}"></div>
+      <div class="field"><label>Altezza</label><input type="number" id="d-height" step="0.2" min="0.1" value="${d.height}"></div>
+      <div class="field"><label>Profondità</label><input type="number" id="d-depth" step="0.5" min="0.2" value="${d.depth}"></div>`;
+    document.getElementById('d-width').addEventListener('change', e=> d.width = Math.max(0.1,parseFloat(e.target.value)||d.width));
+    document.getElementById('d-height').addEventListener('change', e=> d.height = Math.max(0.1,parseFloat(e.target.value)||d.height));
+    document.getElementById('d-depth').addEventListener('change', e=> d.depth = Math.max(0.1,parseFloat(e.target.value)||d.depth));
+  }
+  if(type==='column'){
+    dimsRow.innerHTML = `
+      <div class="field"><label>Raggio</label><input type="number" id="d-radius" step="0.1" min="0.1" value="${d.radius}"></div>
+      <div class="field"><label>Altezza</label><input type="number" id="d-height" step="0.2" min="0.1" value="${d.height}"></div>`;
+    document.getElementById('d-radius').addEventListener('change', e=> d.radius = Math.max(0.1,parseFloat(e.target.value)||d.radius));
+    document.getElementById('d-height').addEventListener('change', e=> d.height = Math.max(0.1,parseFloat(e.target.value)||d.height));
+  }
+
+  document.getElementById('new-color').oninput = (e)=>{ d.color = hexToDec(e.target.value); };
+}
+
+document.getElementById('tool-select').addEventListener('click', ()=> setTool('select'));
+document.querySelectorAll('#sculpt-seg button').forEach(b=>{
+  b.addEventListener('click', ()=> setTool(b.dataset.tool));
+});
+document.getElementById('new-elevated').addEventListener('change', (e)=>{
+  placeElevated = e.target.checked;
+  document.getElementById('new-elevation-field').style.display = placeElevated? 'block':'none';
+});
+document.getElementById('new-elevation').addEventListener('change', (e)=>{
+  placeElevation = parseFloat(e.target.value)||10;
+});
+
+/* build object palette buttons */
+const paletteWrap = document.getElementById('obj-palette');
+Object.keys(TYPE_LABEL).forEach(type=>{
+  const btn = document.createElement('button');
+  btn.className = 'obj-btn';
+  btn.dataset.tool = 'place-'+type;
+  btn.innerHTML = `${ICONS[type]}<span>${TYPE_LABEL[type]}</span>`;
+  btn.addEventListener('click', ()=> setTool('place-'+type));
+  paletteWrap.appendChild(btn);
+});
+
+/* sculpt seg icons */
+document.querySelector('[data-tool="sculpt-raise"]').innerHTML = ICONS.raise + '<span>Alza</span>';
+document.querySelector('[data-tool="sculpt-lower"]').innerHTML = ICONS.lower + '<span>Abbassa</span>';
+document.querySelector('[data-tool="sculpt-smooth"]').innerHTML = ICONS.smooth + '<span>Leviga</span>';
+document.getElementById('tool-select').innerHTML = ICONS.select + '<span>Seleziona / naviga</span>';
+document.getElementById('btn-reset-terrain').innerHTML = ICONS.newfile + '<span>Reimposta terreno</span>';
+
+/* terrain size / resolution / brush inputs */
+document.getElementById('in-radius').addEventListener('input', (e)=>{
+  brushRadius = parseFloat(e.target.value);
+  document.getElementById('val-radius').textContent = brushRadius;
+});
+document.getElementById('in-strength').addEventListener('input', (e)=>{
+  brushStrength = parseFloat(e.target.value);
+  document.getElementById('val-strength').textContent = brushStrength;
+});
+document.getElementById('in-size').addEventListener('change', (e)=>{
+  const v = clamp(parseFloat(e.target.value)||world.terrain.size, 20, 800);
+  world.terrain.size = v;
+  e.target.value = v;
+  rebuildTerrainMesh();
+  rebuildAllObjectMeshes();
+  pushUndoSnapshot();
+});
+document.getElementById('in-res').addEventListener('change', (e)=>{
+  let v = Math.round(parseFloat(e.target.value)||world.terrain.resolution);
+  v = clamp(v, 9, 161);
+  if(v%2===0) v+=1;
+  world.terrain.heights = resampleHeights(world.terrain.heights, world.terrain.resolution, v);
+  world.terrain.resolution = v;
+  e.target.value = v;
+  rebuildTerrainMesh();
+  pushUndoSnapshot();
+});
+document.getElementById('btn-reset-terrain').addEventListener('click', ()=>{
+  openConfirmModal(
+    'Reimposta terreno',
+    'Il rilievo del terreno tornerà piatto. Gli oggetti posizionati non vengono toccati. Continuare?',
+    ()=>{
+      const { resolution } = world.terrain;
+      world.terrain.heights = Array.from({length:resolution}, ()=> new Array(resolution).fill(0));
+      rebuildTerrainMesh();
+      pushUndoSnapshot();
+    }
+  );
+});
+
+/* keyboard shortcuts */
+window.addEventListener('keydown', (e)=>{
+  const tag = document.activeElement.tagName;
+  if(tag==='INPUT' || tag==='TEXTAREA') return;
+  if(e.key==='Escape'){ setTool('select'); selectObject(null); }
+  else if((e.key==='Delete'||e.key==='Backspace') && selectedId!=null){ deleteObject(selectedId); }
+  else if(e.ctrlKey && e.key.toLowerCase()==='z' && e.shiftKey){ e.preventDefault(); redo(); }
+  else if(e.ctrlKey && e.key.toLowerCase()==='z'){ e.preventDefault(); undo(); }
+  else if(e.ctrlKey && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); }
+});
+
+/* =========================================================================
+   UNDO / REDO
+   ========================================================================= */
+let undoStack = [];
+let redoStack = [];
+const UNDO_LIMIT = 40;
+
+function snapshotWorld(){ return JSON.stringify(world); }
+function pushUndoSnapshot(){
+  undoStack.push(snapshotWorld());
+  if(undoStack.length>UNDO_LIMIT) undoStack.shift();
+  redoStack = [];
+  updateUndoRedoButtons();
+}
+function undo(){
+  if(undoStack.length<2) return;
+  redoStack.push(undoStack.pop());
+  const snap = undoStack[undoStack.length-1];
+  loadWorldFromData(JSON.parse(snap), false);
+  updateUndoRedoButtons();
+}
+function redo(){
+  if(!redoStack.length) return;
+  const snap = redoStack.pop();
+  undoStack.push(snap);
+  loadWorldFromData(JSON.parse(snap), false);
+  updateUndoRedoButtons();
+}
+function updateUndoRedoButtons(){
+  document.getElementById('btn-undo').disabled = undoStack.length<2;
+  document.getElementById('btn-redo').disabled = redoStack.length===0;
+}
+document.getElementById('btn-undo').innerHTML = ICONS.undo;
+document.getElementById('btn-redo').innerHTML = ICONS.redo;
+document.getElementById('btn-undo').addEventListener('click', undo);
+document.getElementById('btn-redo').addEventListener('click', redo);
+
+/* =========================================================================
+   LOAD / RESET WORLD
+   ========================================================================= */
+function loadWorldFromData(data, resetHistory){
+  world = data;
+  idCounter = 1 + world.objects.reduce((m,o)=> Math.max(m, o.id||0), 0);
+  document.getElementById('in-size').value = world.terrain.size;
+  document.getElementById('in-res').value = world.terrain.resolution;
+  rebuildTerrainMesh();
+  rebuildAllObjectMeshes();
+  selectObject(null);
+  renderObjList();
+  if(resetHistory){ undoStack = [snapshotWorld()]; redoStack = []; updateUndoRedoButtons(); }
+}
+
+function startNewMap(){
+  loadWorldFromData(makeDefaultWorld(), true);
+}
+
+/* =========================================================================
+   IMPORT / EXPORT
+   ========================================================================= */
+function buildExportData(){
+  return {
+    terrain: {
+      size: round2(world.terrain.size),
+      resolution: world.terrain.resolution,
+      heights: world.terrain.heights.map(row=> row.map(h=> round3(h)))
+    },
+    objects: world.objects.map(o=>{
+      const base = { type:o.type, x:round3(o.x), y:round3(o.y), z:round3(o.z) };
+      if(o.type==='tree'){ /* only position, per spec */ }
+      if(o.type==='building' || o.type==='platform'){
+        Object.assign(base, { width:round3(o.width), height:round3(o.height), depth:round3(o.depth), color:o.color });
+      }
+      if(o.type==='column'){
+        Object.assign(base, { radius:round3(o.radius), height:round3(o.height),
+          rotation:{ x:round3(o.rotation.x), y:round3(o.rotation.y), z:round3(o.rotation.z) }, color:o.color });
+      }
+      if(o.type==='ramp'){
+        Object.assign(base, { width:round3(o.width), height:round3(o.height), depth:round3(o.depth),
+          rotation:{ x:round3(o.rotation.x), y:round3(o.rotation.y), z:round3(o.rotation.z) }, color:o.color });
+      }
+      return base;
+    })
+  };
+}
+
+function validateImportData(data){
+  if(typeof data !== 'object' || data===null) return 'Il JSON non è un oggetto valido.';
+  if(!data.terrain) return 'Manca il campo "terrain".';
+  const t = data.terrain;
+  if(typeof t.size !== 'number') return 'terrain.size deve essere un numero.';
+  if(typeof t.resolution !== 'number') return 'terrain.resolution deve essere un numero.';
+  if(!Array.isArray(t.heights) || t.heights.length !== t.resolution) return 'terrain.heights deve essere una griglia resolution × resolution.';
+  for(const row of t.heights){ if(!Array.isArray(row) || row.length !== t.resolution) return 'Ogni riga di terrain.heights deve avere "resolution" valori.'; }
+  if(!Array.isArray(data.objects)) return 'Manca il campo "objects" (deve essere un array).';
+  const validTypes = ['tree','building','platform','column','ramp'];
+  for(const o of data.objects){
+    if(!validTypes.includes(o.type)) return `Tipo oggetto sconosciuto: "${o.type}".`;
+    if(typeof o.x!=='number' || typeof o.y!=='number' || typeof o.z!=='number') return `Un oggetto di tipo "${o.type}" ha coordinate mancanti o non numeriche.`;
+  }
+  return null;
+}
+function normalizeImportedData(data){
+  const objects = data.objects.map(o=>{
+    const obj = { id: idCounter++, type:o.type, x:o.x, y:o.y, z:o.z };
+    if(o.type==='tree'){ obj.color = typeof o.color==='number'? o.color : paletteDefaults.tree.color; }
+    if(o.type==='building' || o.type==='platform'){
+      obj.width = o.width ?? 6; obj.height = o.height ?? 4; obj.depth = o.depth ?? 6;
+      obj.color = typeof o.color==='number'? o.color : 0x8d7f6b;
+    }
+    if(o.type==='column'){
+      obj.radius = o.radius ?? 1; obj.height = o.height ?? 6;
+      obj.color = typeof o.color==='number'? o.color : 0x9c8f7c;
+      obj.rotation = { x:o.rotation?.x||0, y:o.rotation?.y||0, z:o.rotation?.z||0 };
+    }
+    if(o.type==='ramp'){
+      obj.width = o.width ?? 8; obj.height = o.height ?? 1.2; obj.depth = o.depth ?? 14;
+      obj.color = typeof o.color==='number'? o.color : 0x8a6a4a;
+      obj.rotation = { x:o.rotation?.x||0, y:o.rotation?.y||0, z:o.rotation?.z||0 };
+    }
+    return obj;
+  });
+  return {
+    terrain: { size:data.terrain.size, resolution:data.terrain.resolution, heights: data.terrain.heights },
+    objects
+  };
+}
+
+/* ---------- modal system ---------- */
+const modalRoot = document.getElementById('modal-root');
+function closeModal(){ modalRoot.innerHTML=''; }
+
+function openConfirmModal(title, message, onConfirm){
+  modalRoot.innerHTML = `
+    <div class="modal-veil">
+      <div class="modal" style="width:400px;">
+        <div class="modal-head"><h2>${title}</h2><button class="modal-close" id="m-close">${ICONS.close}</button></div>
+        <div class="modal-body"><p>${message}</p></div>
+        <div class="modal-foot">
+          <button class="ibtn" id="m-cancel">Annulla</button>
+          <button class="ibtn primary" id="m-confirm">Conferma</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('m-close').onclick = closeModal;
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-confirm').onclick = ()=>{ closeModal(); onConfirm(); };
+}
+
+function openImportModal(){
+  modalRoot.innerHTML = `
+    <div class="modal-veil">
+      <div class="modal">
+        <div class="modal-head"><h2>Importa mappa</h2><button class="modal-close" id="m-close">${ICONS.close}</button></div>
+        <div class="modal-body">
+          <p>Incolla un file JSON conforme allo schema di Carmina, oppure carica un file dal disco.</p>
+          <div class="file-drop" id="file-trigger">Clicca per scegliere un file .json</div>
+          <input type="file" id="file-input" accept=".json,application/json" style="display:none;">
+          <textarea class="json-area" id="import-text" placeholder='{"terrain": {...}, "objects": [...]}'></textarea>
+          <div class="error-text" id="import-error"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="ibtn" id="m-cancel">Annulla</button>
+          <button class="ibtn primary" id="m-apply">Carica mappa</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('m-close').onclick = closeModal;
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('file-trigger').onclick = ()=> document.getElementById('file-input').click();
+  document.getElementById('file-input').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=> { document.getElementById('import-text').value = reader.result; };
+    reader.readAsText(file);
+  });
+  document.getElementById('m-apply').onclick = ()=>{
+    const raw = document.getElementById('import-text').value.trim();
+    const errEl = document.getElementById('import-error');
+    errEl.textContent = '';
+    if(!raw){ errEl.textContent = 'Incolla o carica un file JSON prima di continuare.'; return; }
+    let data;
+    try{ data = JSON.parse(raw); }
+    catch(err){ errEl.textContent = 'JSON non valido: ' + err.message; return; }
+    const problem = validateImportData(data);
+    if(problem){ errEl.textContent = problem; return; }
+    const normalized = normalizeImportedData(data);
+    loadWorldFromData(normalized, true);
+    closeModal();
+  };
+}
+
+function openExportModal(){
+  const data = buildExportData();
+  const json = JSON.stringify(data, null, 2);
+  modalRoot.innerHTML = `
+    <div class="modal-veil">
+      <div class="modal">
+        <div class="modal-head"><h2>Esporta mappa</h2><button class="modal-close" id="m-close">${ICONS.close}</button></div>
+        <div class="modal-body">
+          <p>Il JSON qui sotto segue lo schema del mondo di Carmina: terreno (dimensione, risoluzione, altezze) e oggetti.</p>
+          <textarea class="json-area" id="export-text" readonly>${json.replace(/</g,'&lt;')}</textarea>
+        </div>
+        <div class="modal-foot">
+          <button class="ibtn" id="m-copy">${ICONS.copy}<span>Copia</span></button>
+          <button class="ibtn primary" id="m-download">${ICONS.download}<span>Scarica .json</span></button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('m-close').onclick = closeModal;
+  document.getElementById('m-copy').onclick = ()=>{
+    navigator.clipboard.writeText(json).then(()=>{
+      const b = document.getElementById('m-copy');
+      const old = b.innerHTML;
+      b.innerHTML = 'Copiato';
+      setTimeout(()=> b.innerHTML = old, 1400);
+    });
+  };
+  document.getElementById('m-download').onclick = ()=>{
+    const blob = new Blob([json], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'carmina-world.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+}
+
+document.getElementById('btn-new').innerHTML = ICONS.newfile + '<span>Nuova mappa</span>';
+document.getElementById('btn-import').innerHTML = ICONS.import + '<span>Importa</span>';
+document.getElementById('btn-export').innerHTML = ICONS.export + '<span>Esporta</span>';
+document.getElementById('btn-new').addEventListener('click', ()=>{
+  openConfirmModal('Nuova mappa', 'La mappa attuale verrà sostituita da un terreno pulito e senza oggetti. Le modifiche non esportate andranno perse. Continuare?', startNewMap);
+});
+document.getElementById('btn-import').addEventListener('click', openImportModal);
+document.getElementById('btn-export').addEventListener('click', openExportModal);
+
+/* =========================================================================
+   RESIZE + RENDER LOOP
+   ========================================================================= */
+function onResize(){
+  const wrap = document.getElementById('canvas-wrap');
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  renderer.setSize(w,h,false);
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', onResize);
+
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+
+/* =========================================================================
+   INIT
+   ========================================================================= */
+loadWorldFromData(makeDefaultWorld(), true);
+setTool('select');
+onResize();
+animate();
+</script>
+</body>
+</html>
