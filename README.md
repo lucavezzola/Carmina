@@ -9,6 +9,9 @@ How to run:
 Then open:
   > http://127.0.0.1:8000
 
+How to run map-editor server (from "world_editor" folder):
+  > python -m http.server 8000
+
 How to open servers to the internet:
 - Python game server
   > cloudflared tunnel --url http://localhost:8765
