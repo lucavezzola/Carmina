@@ -579,6 +579,8 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   let velocityZ = 0;
   let verticalVelocity = 0;
   let isGrounded = true;
+  let horizontalMovementStartX = 0;
+  let horizontalMovementStartZ = 0;
 
   document.addEventListener('keydown', (e) => {
     setKey(e.code, true);
@@ -845,6 +847,20 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     camera.position.y += verticalVelocity * delta;
 
     const currentFeetHeight = camera.position.y - EYE_HEIGHT;
+    for (const o of obstacles) {
+      const resolver = o.type === 'box' ? rayUpHeightOnBox : rayUpHeightOnCylinder;
+      if (!resolver) continue;
+      const undersideY = resolver(o, camera.position.x, camera.position.z);
+      const terrainBodyTop = terrainHeightAt(camera.position.x, camera.position.z)
+        + BODY_HEIGHT + BODY_RADIUS;
+      if (undersideY !== null && currentFeetHeight < undersideY
+        && terrainBodyTop >= undersideY - 0.05) {
+        camera.position.x = horizontalMovementStartX;
+        camera.position.z = horizontalMovementStartZ;
+        break;
+      }
+    }
+
     if (verticalVelocity > 0) {
       for (const o of obstacles) {
         const resolver = o.type === 'box' ? rayUpHeightOnBox : rayUpHeightOnCylinder;
@@ -900,6 +916,9 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
 
   function updateMovement(delta) {
     if (!controls.isLocked) return;
+
+    horizontalMovementStartX = camera.position.x;
+    horizontalMovementStartZ = camera.position.z;
 
     if (isGrounded) {
       let dx = 0, dz = 0;
