@@ -11,6 +11,8 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   const EYE_HEIGHT = BODY_HEIGHT + 0.3;
   const GRAVITY = 18.0;
   const JUMP_SPEED = 13.0;
+  const GROUND_FOLLOW_MAX_DROP = 0.5;
+  const GROUND_GRACE_PERIOD = 0.12;
   const PLAYER_RADIUS = 0.35;
   const POSITION_SEND_INTERVAL_MS = 100;
   const REMOTE_LERP_FACTOR = 0.18;
@@ -231,8 +233,6 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     });
   }
 
-  createColumn(5, terrainHeightAt(5, 10) + 1.5, 10, 0.5, 3, { x: 0, y: 0, z: 0 }, 0xaaaaaa);
-
   function buildWorldFromServer(worldMap) {
     buildTerrain(worldMap.terrain);
     for (const object of worldMap.objects) {
@@ -240,6 +240,12 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
         createTree(object.x, object.y, object.z);
       } else if (object.type === 'building') {
         createBuilding(object.x, object.y, object.z, object.width, object.height, object.depth, object.color);
+      } else if (object.type === 'platform') {
+        createBuilding(object.x, object.y, object.z, object.width, object.height, object.depth, object.color);
+      } else if (object.type === 'column') {
+        createColumn(object.x, object.y, object.z, object.radius, object.height, object.rotation, object.color);
+      } else if (object.type === 'ramp') {
+        createRotatedBox(object.x, object.y, object.z, object.width, object.height, object.depth, object.rotation, object.color);
       }
     }
   }
@@ -579,14 +585,16 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   let velocityZ = 0;
   let verticalVelocity = 0;
   let isGrounded = true;
+  let groundedGraceTime = GROUND_GRACE_PERIOD;
   let horizontalMovementStartX = 0;
   let horizontalMovementStartZ = 0;
 
   document.addEventListener('keydown', (e) => {
     setKey(e.code, true);
-    if (e.code === 'Space' && isGrounded && controls.isLocked) {
+    if (e.code === 'Space' && (isGrounded || groundedGraceTime > 0) && controls.isLocked) {
       verticalVelocity = JUMP_SPEED;
       isGrounded = false;
+      groundedGraceTime = 0;
     }
   });
   document.addEventListener('keyup', (e) => setKey(e.code, false));
@@ -842,6 +850,8 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   function updateVerticalMovement(delta) {
     if (!controls.isLocked) return;
 
+    const wasGrounded = isGrounded;
+    groundedGraceTime = Math.max(0, groundedGraceTime - delta);
     const previousFeetHeight = camera.position.y - EYE_HEIGHT;
     verticalVelocity -= GRAVITY * delta;
     camera.position.y += verticalVelocity * delta;
@@ -894,10 +904,16 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     }
     const minCameraY = supportHeight + EYE_HEIGHT;
 
+    if (wasGrounded && verticalVelocity <= 0
+      && camera.position.y - minCameraY <= GROUND_FOLLOW_MAX_DROP) {
+      camera.position.y = minCameraY;
+    }
+
     if (camera.position.y <= minCameraY) {
       camera.position.y = minCameraY;
       verticalVelocity = 0;
       isGrounded = true;
+      groundedGraceTime = GROUND_GRACE_PERIOD;
     } else {
       isGrounded = false;
     }

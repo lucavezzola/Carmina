@@ -24,10 +24,10 @@ def generate_heightmap(seed=42):
         for _ in range(5)
     ]
 
-    river_amplitude = 8.0
+    river_amplitude = 12.0
     river_freq = 0.04
-    river_width = 3.0
-    river_depth = 2.5
+    river_width = 4.0
+    river_depth = 3.5
 
     half = TERRAIN_SIZE / 2
     heights = []
@@ -40,6 +40,10 @@ def generate_heightmap(seed=42):
             h = 0.0
             for w in waves:
                 h += w["amplitude"] * math.sin(x * w["freq_x"] + w["phase"]) * math.cos(z * w["freq_z"] + w["phase"])
+
+            mountain = 12.0 * math.exp(-((x + 42) ** 2 + (z - 38) ** 2) / 850.0)
+            ridge = 7.0 * math.exp(-((x - 58) ** 2 + (z + 42) ** 2) / 1200.0)
+            h += mountain + ridge
 
             river_x = river_amplitude * math.sin(z * river_freq)
             distance_from_river = abs(x - river_x)
@@ -76,18 +80,20 @@ def generate_world_map():
     heights = generate_heightmap(seed=42)
     objects = []
 
-    for _ in range(14):
+    for _ in range(42):
         angle = rng.uniform(0, math.pi * 2)
-        distance = rng.uniform(8, 33)
+        distance = rng.uniform(8, 78)
         x = math.cos(angle) * distance
         z = math.sin(angle) * distance
         y = terrain_height_at(heights, x, z)
         objects.append({"type": "tree", "x": x, "y": y, "z": z})
 
     building_specs = [
-        (-8, -6, 4, 3.5, 4, 0x8a7a6a),
-        (9, -4, 5, 4.5, 3, 0x9a8a7a),
-        (0, -14, 6, 5, 5, 0x7a6a5a),
+        (-18, -12, 7, 5, 7, 0x8a7a6a),
+        (18, -8, 9, 6, 6, 0x9a8a7a),
+        (-4, -30, 10, 7, 8, 0x7a6a5a),
+        (38, 20, 8, 5, 10, 0x6d7f86),
+        (-42, 28, 11, 8, 7, 0x806b5b),
     ]
     for x, z, width, height, depth, color in building_specs:
         y = terrain_height_at(heights, x, z)
@@ -100,6 +106,46 @@ def generate_world_map():
             "height": height,
             "depth": depth,
             "color": color,
+        })
+
+    column_specs = [
+        (-12, 5, 0.9, 5, 0xb8b1a4), (12, 10, 0.8, 4, 0xb8b1a4),
+        (28, -22, 1.0, 6, 0x9ea7ad), (-30, -26, 0.75, 4.5, 0xc2b280),
+        (48, 2, 1.1, 7, 0x87939a),
+    ]
+    for x, z, radius, height, color in column_specs:
+        objects.append({
+            "type": "column", "x": x, "y": terrain_height_at(heights, x, z) + height / 2,
+            "z": z, "radius": radius, "height": height, "rotation": {"x": 0, "y": 0, "z": 0},
+            "color": color,
+        })
+
+    platform_specs = [
+        (-34, -2, 8, 0.8, 8, 5.0, 0x526b73),
+        (-20, 14, 6, 0.7, 6, 3.5, 0x5f7880),
+        (4, 24, 7, 0.8, 7, 6.0, 0x806c5a),
+        (30, 34, 10, 0.8, 6, 8.0, 0x526b73),
+        (58, -8, 8, 0.8, 8, 5.5, 0x6f6659),
+    ]
+    for x, z, width, height, depth, lift, color in platform_specs:
+        base_y = terrain_height_at(heights, x, z) + lift
+        objects.append({
+            "type": "platform", "x": x, "y": base_y, "z": z,
+            "width": width, "height": height, "depth": depth, "color": color,
+        })
+
+    ramp_specs = [
+        (-28, 8, 8, 1.2, 14, 0.28, 0x9b7653),
+        (8, -2, 7, 1.0, 12, -0.32, 0x8c694d),
+        (34, 12, 9, 1.2, 16, 0.25, 0x9a795b),
+        (-4, 42, 8, 1.0, 14, -0.28, 0x766a5c),
+    ]
+    for x, z, width, height, depth, angle, color in ramp_specs:
+        center_y = terrain_height_at(heights, x, z) + 2.0
+        objects.append({
+            "type": "ramp", "x": x, "y": center_y, "z": z,
+            "width": width, "height": height, "depth": depth,
+            "rotation": {"x": angle, "y": 0, "z": 0}, "color": color,
         })
 
     return {
