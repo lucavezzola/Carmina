@@ -2,9 +2,12 @@
 
 How to run:
 - Python game server
-  > python .\server.run
-- HTTP server
-  > python -m http.server 8080
+  > python .\server.py
+- Browser client (serves the public folder and supports .mjs modules)
+  > python .\dev_server.py
+
+Then open:
+  > http://127.0.0.1:8000
 
 How to open servers to the internet:
 - Python game server
