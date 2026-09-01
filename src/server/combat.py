@@ -48,6 +48,7 @@ def projected_position(caster_slot, target_slot):
 
 
 def projected_from_origin(origin, forward, target_slot):
+    """Project a target onto a spell ray that starts at an arbitrary origin."""
     target = players[target_slot]
     ox, oy, oz = origin
     fx, fy, fz = forward
@@ -66,6 +67,7 @@ def projected_from_origin(origin, forward, target_slot):
 
 
 def find_lightning_target(caster_slot):
+    """Find the nearest player inside the caster's forward lightning corridor."""
     best_slot = None
     best_distance = None
     for slot in players:
@@ -83,6 +85,7 @@ def find_lightning_target(caster_slot):
 
 
 def find_fire_targets_static(origin, forward, exclude_slot=None):
+    """Find players inside the expanding cone of a fire spell."""
     hit_slots = []
     for slot in players:
         if slot == exclude_slot:
@@ -98,6 +101,7 @@ def find_fire_targets_static(origin, forward, exclude_slot=None):
 
 
 async def apply_damage(slot, amount):
+    """Apply shields, health changes, defeat notifications, and respawn scheduling."""
     player_state = players.get(slot)
     if player_state is None:
         return
@@ -115,6 +119,7 @@ async def apply_damage(slot, amount):
 
 
 async def respawn_after_delay(slot):
+    """Restore a defeated player after the configured respawn delay."""
     await asyncio.sleep(RESPAWN_DELAY_S)
     player_state = players.get(slot)
     if player_state is None:
@@ -134,6 +139,7 @@ async def respawn_after_delay(slot):
 
 
 async def run_fire_effect(caster_slot, origin, forward):
+    """Apply fire cone damage once per configured effect tick."""
     ticks = int(FIRE_DURATION_S / FIRE_TICK_INTERVAL_S)
     for i in range(ticks):
         targets = find_fire_targets_static(origin, forward, exclude_slot=caster_slot)
@@ -144,6 +150,7 @@ async def run_fire_effect(caster_slot, origin, forward):
 
 
 async def try_spell(slot, word):
+    """Validate cooldowns and execute the requested authoritative spell action."""
     player_state = players.get(slot)
     if player_state is None:
         return

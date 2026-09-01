@@ -50,6 +50,7 @@ except Exception:
 # Moved to src/server/voice.py.
 
 async def main():
+    """Start the WebSocket server and keep it alive for connected clients."""
     async with websockets.serve(lambda ws: handle_client(ws, model, WORLD_MAP), SERVER_ADDRESS, SERVER_PORT):
         print(f"server vocale in ascolto su wss://{SERVER_ADDRESS}:{SERVER_PORT}")
         await asyncio.Future()

@@ -6,6 +6,7 @@ server gameplay rules and the client visual logic.
 
 import math
 
+# Network endpoints and shared gameplay dimensions.
 SERVER_ADDRESS = "0.0.0.0"
 SERVER_PORT = 8765
 
@@ -19,6 +20,7 @@ SPAWN_RADIUS = 3.0
 EYE_HEIGHT = 1.7
 players = {}
 
+# Terrain settings must match the generated map and browser interpolation.
 TERRAIN_SIZE = 180.0
 TERRAIN_RESOLUTION = 65
 WORLD_MAP_PATH = "world_map.json"

@@ -13,6 +13,7 @@ from .config import TERRAIN_RESOLUTION, TERRAIN_SIZE, WORLD_MAP_PATH, MAX_PLAYER
 
 
 def generate_heightmap(seed=42):
+    """Create deterministic terrain with rolling noise, a river, hills, and mountain ridges."""
     rng = random.Random(seed)
     waves = [
         {
@@ -76,6 +77,7 @@ def terrain_height_at(heights, x, z):
 
 
 def generate_world_map():
+    """Build the authoritative parkour layout sent to every connected client."""
     rng = random.Random(42)
     heights = generate_heightmap(seed=42)
     objects = []
@@ -155,6 +157,7 @@ def generate_world_map():
 
 
 def load_or_generate_world_map():
+    """Load the saved map when present, otherwise generate and persist a new one."""
     if os.path.exists(WORLD_MAP_PATH):
         with open(WORLD_MAP_PATH, "r") as f:
             return json.load(f)
@@ -166,6 +169,7 @@ def load_or_generate_world_map():
 
 
 def spawn_position(slot, world_map=None):
+    """Place a player on the server terrain at a slot-specific point around the spawn ring."""
     angle = (slot / MAX_PLAYERS) * math.pi * 2
     x = math.cos(angle) * SPAWN_RADIUS
     z = math.sin(angle) * SPAWN_RADIUS

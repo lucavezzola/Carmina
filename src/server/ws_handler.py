@@ -15,6 +15,7 @@ from .players import spawn_position
 
 
 async def handle_client(websocket, model, world_map):
+    """Register one client, stream speech/position messages, and clean up on exit."""
     slot = None
     for candidate in range(5):
         if candidate not in players:

@@ -1,7 +1,9 @@
 export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.com' } = {}) {
+  // Prevent duplicate listeners and animation loops if the module is loaded twice.
   if (window.__carminaClientBooted) return;
   window.__carminaClientBooted = true;
 
+  // Gameplay constants are kept here so movement, collision, and spell effects use one scale.
   const WS_URL = wsUrl;
   const MOVE_SPEED = 8.0;
   const ACCELERATION = 20.0;
@@ -26,12 +28,14 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   const FIRE_RADIUS_NEAR = 0.5;
   const FIRE_RADIUS_FAR = 2.5;
 
+  // Cache HUD elements used by damage and health updates.
   const healthFillEl = document.getElementById('healthbar-fill');
   const healthLabelEl = document.getElementById('healthbar-label');
   const damageVignetteEl = document.getElementById('damage-vignette');
   let vignetteFadeTimeout = null;
 
   function flashDamageVignette(damageAmount) {
+    // Briefly tint the screen; the timeout guarantees the effect fades after rapid hits.
     const intensity = Math.min(1, 0.35 + damageAmount / 100);
     damageVignetteEl.style.transition = 'none';
     damageVignetteEl.style.opacity = intensity;
@@ -46,6 +50,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function updateHealthBar(hp) {
+    // Clamp health before converting it to the bar height and color.
     const clamped = Math.max(0, Math.min(MAX_HP, hp));
     const fraction = clamped / MAX_HP;
     healthFillEl.style.height = `${fraction * 100}%`;
@@ -54,6 +59,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     healthFillEl.style.background = `hsl(${hue}, 70%, 45%)`;
   }
 
+  // Create the Three.js scene, camera, lighting, and renderer.
   const canvas = document.getElementById('scene');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -83,9 +89,11 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
   grassTexture.repeat.set(5, 5);
 
+  // Terrain is received from the server and sampled locally for smooth movement.
   let terrainData = null;
 
   function buildTerrain(terrain) {
+    // Deform a plane mesh with the server height grid.
     terrainData = terrain;
     const { size, resolution, heights } = terrain;
 
@@ -106,6 +114,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function terrainHeightAt(x, z) {
+    // Bilinear interpolation keeps movement height continuous between grid points.
     if (!terrainData) return 0;
     const { size, resolution, heights } = terrainData;
     const half = size / 2;
@@ -126,9 +135,11 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     return top * (1 - tz) + bottom * tz;
   }
 
+  // Every collidable world object is represented by a compact local collision descriptor.
   const obstacles = [];
 
   function ensureObstacleTransform(o) {
+    // Older map objects may not include rotation data, so default them to identity transforms.
     if (!o) return;
     if (!o.quaternion) o.quaternion = new THREE.Quaternion();
     if (!o.invQuaternion) o.invQuaternion = o.quaternion.clone().invert();
@@ -138,6 +149,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function createTree(x, y, z) {
+    // Trees render as foliage and a simple cylindrical trunk collider.
     const trunk_radius_top = 0.1;
     const trunk_radius_bottom = 0.2;
     const trunk_height = 1.4;
@@ -175,6 +187,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function createBuilding(x, y, z, width, height, depth, color) {
+    // Buildings are axis-aligned boxes whose y argument is their base height.
     const boxCenterY = y + height / 2;
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(width, height, depth),
@@ -200,6 +213,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function createRotatedBox(x, y, z, width, height, depth, rotation, color) {
+    // Ramps use the same box collider as buildings, rotated in local space.
     const { quaternion, invQuaternion } = makeRotationQuaternions(rotation);
 
     const mesh = new THREE.Mesh(
@@ -217,6 +231,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function createColumn(x, y, z, radius, height, rotation, color) {
+    // Columns use a cylinder mesh and a matching cylinder collision descriptor.
     const { quaternion, invQuaternion } = makeRotationQuaternions(rotation);
 
     const mesh = new THREE.Mesh(
@@ -234,6 +249,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function buildWorldFromServer(worldMap) {
+    // The server owns layout; this function only turns its object records into client geometry.
     buildTerrain(worldMap.terrain);
     for (const object of worldMap.objects) {
       if (object.type === 'tree') {
@@ -251,6 +267,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function createWizard(color) {
+    // Build the visible player model; local movement uses the body sphere dimensions below.
     const group = new THREE.Group();
 
     const bodyMaterial = new THREE.MeshStandardMaterial({ color, emissive: 0x000000, emissiveIntensity: 0 });
@@ -304,6 +321,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   let myHp = MAX_HP;
 
   function addRemotePlayer(slot, x, z, groundY, yaw, pitch) {
+    // Create a remote player and store its latest network target for interpolation.
     if (remotePlayers[slot]) return;
     const color = 0x4040ff + slot * 0x203040;
     const { group, bodyMaterial, head } = createWizard(color);
@@ -325,6 +343,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function updateRemotePlayer(slot, x, z, groundY, yaw, pitch) {
+    // Network packets update targets; rendering eases toward them each frame.
     const player = remotePlayers[slot];
     if (!player) return;
     player.targetX = x;
@@ -349,6 +368,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   const worldPosition = new THREE.Vector3();
 
   function spawnParticles(color, count, origin) {
+    // Create short-lived particles and their per-particle velocities.
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
     const velocities = [];
@@ -409,6 +429,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function castLightning(anchor, forward, targetAnchor) {
+    // Render a jagged bolt between the caster and target or a point in front of the caster.
     anchor.getWorldPosition(worldPosition);
     const material = getBodyMaterial(anchor);
     if (material) {
@@ -459,6 +480,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function castFire(origin, forward, durationMs) {
+    // Keep spawning cone-shaped fire particles until the spell duration expires.
     const up = Math.abs(forward.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(forward, up).normalize();
     const trueUp = new THREE.Vector3().crossVectors(right, forward).normalize();
@@ -490,6 +512,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function spawnConeParticles(color, count, origin, forward, right, up) {
+    // Distribute particles inside an expanding cone aligned with the spell direction.
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
     const velocities = [];
@@ -529,6 +552,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function castShield(anchor) {
+    // Attach a temporary expanding shield mesh to the player's anchor.
     if (anchor.userData.shieldMesh) anchor.remove(anchor.userData.shieldMesh);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.9, 32, 32),
@@ -552,6 +576,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     if (player) player.group.userData.bodyMaterial = player.bodyMaterial;
   }
 
+  // Cooldowns are client-side presentation; the server remains authoritative for spell rules.
   const lastLocalCast = { fulmine: 0, scudo: 0, fuoco: 0 };
   const cooldownBars = {};
   document.querySelectorAll('.fill').forEach((el) => {
@@ -566,6 +591,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     }
   }
 
+  // Pointer lock controls connect mouse look and keyboard movement to the camera.
   const controls = new THREE.PointerLockControls(camera, document.body);
   const overlay = document.getElementById('overlay');
   const crosshair = document.getElementById('crosshair');
@@ -580,6 +606,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     crosshair.style.display = 'none';
   });
 
+  // Movement state is separated from velocity so airborne acceleration can be preserved.
   const keys = { forward: false, backward: false, left: false, right: false };
   let velocityX = 0;
   let velocityZ = 0;
@@ -600,6 +627,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   document.addEventListener('keyup', (e) => setKey(e.code, false));
 
   function setKey(code, value) {
+    // Translate browser key codes into the four movement flags.
     if (code === 'KeyW') keys.forward = value;
     if (code === 'KeyS') keys.backward = value;
     if (code === 'KeyA') keys.left = value;
@@ -607,6 +635,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function groundHeightAt(x, z) {
+    // Return the highest valid downward surface at a horizontal position.
     let height = terrainHeightAt(x, z);
     for (const o of obstacles) {
       const resolver = SURFACE_HEIGHT_RESOLVERS[o.type];
@@ -618,6 +647,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function makeRotationQuaternions(rotation) {
+    // Keep world/local conversions consistent with each rendered rotated obstacle.
     const euler = new THREE.Euler(rotation?.x || 0, rotation?.y || 0, rotation?.z || 0, 'XYZ');
     const quaternion = new THREE.Quaternion().setFromEuler(euler);
     const invQuaternion = quaternion.clone().invert();
@@ -642,6 +672,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   const RAY_TOP = 200;
 
   function rayVerticalHeightOnBox(o, x, z, direction, originY) {
+    // Ray-box intersection used for both roof support and underside head impacts.
     const rayOriginWorld = new THREE.Vector3(x, originY, z);
     const localOrigin = toLocalPoint(o, rayOriginWorld);
     const worldDirection = new THREE.Vector3(0, direction, 0);
@@ -683,6 +714,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function rayVerticalHeightOnCylinder(o, x, z, direction, originY) {
+    // Ray-cylinder intersection used for column tops and bottoms.
     const rayOriginWorld = new THREE.Vector3(x, originY, z);
     const O = toLocalPoint(o, rayOriginWorld);
     const D = toLocalDirection(o, new THREE.Vector3(0, direction, 0));
@@ -737,6 +769,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function applySpherePush(worldPoint, closestWorld) {
+    // Push the body horizontally out of a nearby curved or corner surface.
     const offset = worldPoint.clone().sub(closestWorld);
     const distance = offset.length();
     if (distance >= PLAYER_RADIUS || distance <= 0.0001) return;
@@ -752,6 +785,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function applyBoxHorizontalPush(o, localPoint) {
+    // Resolve only side penetration; vertical contacts are handled by movement grounding.
     const verticalDistance = Math.max(0, Math.abs(localPoint.y) - o.halfHeight);
     if (verticalDistance >= BODY_RADIUS) return;
 
@@ -771,6 +805,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function resolveBoxCollision(o, feetHeight) {
+    // Keep the body inside valid vertical space without ejecting it from roofs or undersides.
     const surfaceY = rayDownHeightOnBox(o, camera.position.x, camera.position.z);
     if (surfaceY !== null && feetHeight >= surfaceY - 0.05) return;
     if (o.topY !== undefined && feetHeight >= o.topY - 0.05) return;
@@ -789,6 +824,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function resolveCylinderCollision(o, feetHeight) {
+    // Apply the same body-clearance rules to pillars, including the centered case.
     const surfaceY = rayDownHeightOnCylinder(o, camera.position.x, camera.position.z);
     if (surfaceY !== null && feetHeight >= surfaceY - 0.05) return;
 
@@ -841,6 +877,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   };
 
   function resolveHorizontalCollisions(feetHeight) {
+    // Run the type-specific horizontal collision resolver for every world obstacle.
     for (const o of obstacles) {
       const resolver = COLLISION_RESOLVERS[o.type];
       if (resolver) resolver(o, feetHeight);
@@ -848,6 +885,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function updateVerticalMovement(delta) {
+    // Apply gravity, stop against ceilings, and land on terrain or descending surfaces.
     if (!controls.isLocked) return;
 
     const wasGrounded = isGrounded;
@@ -922,6 +960,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   let pointerLockRequestPending = false;
 
   function requestPointerLock() {
+    // Delay the browser lock request slightly so it follows the user gesture reliably.
     if (document.pointerLockElement === document.body || pointerLockRequestPending) return;
     pointerLockRequestPending = true;
     setTimeout(() => {
@@ -931,6 +970,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function updateMovement(delta) {
+    // Apply grounded/airborne movement and remember the position before this frame's step.
     if (!controls.isLocked) return;
 
     horizontalMovementStartX = camera.position.x;
@@ -1006,6 +1046,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   let lastPositionSentAt = 0;
 
   async function connectToServer() {
+    // Open the WebSocket and route world, player, spell, and health messages.
     socket = new WebSocket(WS_URL);
     socket.binaryType = 'arraybuffer';
 
@@ -1126,6 +1167,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   async function startMicrophone() {
+    // Feed microphone PCM data into the audio worklet and then to the game server.
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioContext = new AudioContext();
     await audioContext.audioWorklet.addModule('./pcm-processor.js');
@@ -1140,6 +1182,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function sendPositionIfDue() {
+    // Throttle position broadcasts to reduce network traffic.
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const now = performance.now();
     if (now - lastPositionSentAt < POSITION_SEND_INTERVAL_MS) return;
@@ -1162,6 +1205,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   let lastFrameTime = performance.now();
 
   function animate() {
+    // Main frame loop: input, physics, networking, effects, and rendering.
     requestAnimationFrame(animate);
     const now = performance.now();
     const delta = Math.min((now - lastFrameTime) / 1000, 0.1);
@@ -1212,6 +1256,7 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   function updateShield(shield) {
+    // Animate shield growth/fade and remove it after its lifetime.
     if (!shield) return;
     const age = performance.now() - shield.userData.born;
     shield.scale.setScalar(Math.min(age / 250, 1));

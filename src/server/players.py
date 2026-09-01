@@ -10,6 +10,7 @@ from .world import generate_heightmap, terrain_height_at
 
 
 def free_slot():
+    """Return the first available player slot, or None when the lobby is full."""
     for i in range(MAX_PLAYERS):
         if i not in players:
             return i
@@ -17,6 +18,7 @@ def free_slot():
 
 
 def spawn_position(slot, world_map=None):
+    """Return a slot-specific spawn point projected onto the current terrain."""
     angle = (slot / MAX_PLAYERS) * math.pi * 2
     x = math.cos(angle) * SPAWN_RADIUS
     z = math.sin(angle) * SPAWN_RADIUS
