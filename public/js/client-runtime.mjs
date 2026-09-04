@@ -72,6 +72,8 @@ export function bootClient() {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87ceeb);
@@ -87,38 +89,106 @@ export function bootClient() {
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x445533, 1.1));
-  const sun = new THREE.DirectionalLight(0xfff4e0, 1.2);
-  sun.position.set(10, 20, 8);
+  scene.add(new THREE.HemisphereLight(0x9fb4c4, 0x2a2420, 0.65));
+  const sun = new THREE.DirectionalLight(0xffe9c2, 1.15);
+  sun.position.set(90, 130, 60);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -140;
+  sun.shadow.camera.right = 140;
+  sun.shadow.camera.top = 140;
+  sun.shadow.camera.bottom = -140;
+  sun.shadow.camera.near = 10;
+  sun.shadow.camera.far = 400;
+  sun.shadow.bias = -0.0015;
   scene.add(sun);
-
-  const textureLoader = new THREE.TextureLoader();
-  const grassTexture = textureLoader.load('https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/terrain/grasslight-big.jpg');
-  grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
-  grassTexture.repeat.set(5, 5);
+  scene.add(new THREE.AmbientLight(0x3a4048, 0.35));
 
   // Terrain is received from the server and sampled locally for smooth movement.
   let terrainData = null;
 
   function buildTerrain(terrain) {
-    // Deform a plane mesh with the server height grid.
+    // Densify the authoritative grid so the terrain keeps the editor's smooth silhouette.
     terrainData = terrain;
     const { size, resolution, heights } = terrain;
-
-    const geometry = new THREE.PlaneGeometry(size, size, resolution - 1, resolution - 1);
+    const subdivisions = (resolution - 1) * 2;
+    const geometry = new THREE.PlaneGeometry(size, size, subdivisions, subdivisions);
     geometry.rotateX(-Math.PI / 2);
 
+    function sampleHeight(gridX, gridZ) {
+      const x0 = Math.floor(gridX);
+      const z0 = Math.floor(gridZ);
+      const x1 = Math.min(x0 + 1, resolution - 1);
+      const z1 = Math.min(z0 + 1, resolution - 1);
+      const tx = gridX - x0;
+      const tz = gridZ - z0;
+      const top = heights[z0][x0] * (1 - tx) + heights[z0][x1] * tx;
+      const bottom = heights[z1][x0] * (1 - tx) + heights[z1][x1] * tx;
+      return top * (1 - tz) + bottom * tz;
+    }
+
     const positions = geometry.attributes.position;
-    for (let iz = 0; iz < resolution; iz++) {
-      for (let ix = 0; ix < resolution; ix++) {
-        positions.setY(iz * resolution + ix, heights[iz][ix]);
+    const colors = new Float32Array(positions.count * 3);
+    const color = new THREE.Color();
+    const stops = [
+      { height: -6, color: [0.62, 0.55, 0.38] },
+      { height: 0, color: [0.40, 0.47, 0.27] },
+      { height: 7, color: [0.33, 0.42, 0.24] },
+      { height: 16, color: [0.46, 0.43, 0.38] },
+      { height: 28, color: [0.78, 0.78, 0.76] },
+    ];
+    for (let iz = 0; iz <= subdivisions; iz++) {
+      for (let ix = 0; ix <= subdivisions; ix++) {
+        const index = iz * (subdivisions + 1) + ix;
+        const gridX = ix / subdivisions * (resolution - 1);
+        const gridZ = iz / subdivisions * (resolution - 1);
+        const height = sampleHeight(gridX, gridZ);
+        positions.setY(index, height);
+
+        let lower = stops[0];
+        let upper = stops[stops.length - 1];
+        for (let stopIndex = 0; stopIndex < stops.length - 1; stopIndex++) {
+          if (height >= stops[stopIndex].height && height <= stops[stopIndex + 1].height) {
+            lower = stops[stopIndex];
+            upper = stops[stopIndex + 1];
+            break;
+          }
+        }
+        const blend = Math.max(0, Math.min(1,
+          (height - lower.height) / (upper.height - lower.height)));
+        color.setRGB(
+          lower.color[0] + (upper.color[0] - lower.color[0]) * blend,
+          lower.color[1] + (upper.color[1] - lower.color[1]) * blend,
+          lower.color[2] + (upper.color[2] - lower.color[2]) * blend,
+        );
+        colors[index * 3] = color.r;
+        colors[index * 3 + 1] = color.g;
+        colors[index * 3 + 2] = color.b;
       }
     }
     positions.needsUpdate = true;
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.computeVertexNormals();
 
-    const material = new THREE.MeshStandardMaterial({ map: grassTexture });
-    scene.add(new THREE.Mesh(geometry, material));
+    const mesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.95,
+        metalness: 0.02,
+        side: THREE.DoubleSide,
+      }),
+    );
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+
+  function enableShadows(object) {
+    object.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
   }
 
   function terrainHeightAt(x, z) {
@@ -224,6 +294,7 @@ export function bootClient() {
     );
     foliage.position.y = cone_height;
     group.add(foliage);
+    enableShadows(group);
     group.position.set(x, y, z);
     scene.add(group);
 
@@ -249,6 +320,7 @@ export function bootClient() {
       new THREE.MeshStandardMaterial({ color })
     );
     mesh.position.set(x, boxCenterY, z);
+    enableShadows(mesh);
     scene.add(mesh);
 
     const quaternion = new THREE.Quaternion();
@@ -278,6 +350,7 @@ export function bootClient() {
     );
     mesh.position.set(x, boxCenterY, z);
     mesh.quaternion.copy(quaternion);
+    enableShadows(mesh);
     scene.add(mesh);
 
     registerObstacle({
@@ -297,6 +370,7 @@ export function bootClient() {
     );
     mesh.position.set(x, centerY, z);
     mesh.quaternion.copy(quaternion);
+    enableShadows(mesh);
     scene.add(mesh);
 
     registerObstacle({
@@ -366,6 +440,7 @@ export function bootClient() {
     head.add(rightEye);
 
     group.add(head);
+  enableShadows(group);
     scene.add(group);
     return { group, bodyMaterial, head };
   }
