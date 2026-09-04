@@ -34,6 +34,23 @@
     background-color: rgba(0, 16, 96, 0.7);
   }
 
+  #debug-panel {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    min-width: 190px;
+    padding: 10px 12px;
+    border: 1px solid rgba(199, 125, 255, 0.45);
+    border-radius: 6px;
+    background: rgba(8, 6, 24, 0.82);
+    color: #e6d9ff;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre;
+    pointer-events: none;
+    display: none;
+    z-index: 6;
+  }
+
 
   #healthbar-container {
     position: fixed; top: 50%; left: 24px; transform: translateY(-50%);
@@ -85,6 +102,7 @@
 <canvas id="scene"></canvas>
 <div id="crosshair"></div>
 <div id="hud">Non connesso</div>
+<div id="debug-panel" aria-hidden="true"></div>
 <div id="healthbar-container">
   <div id="healthbar-track"><div id="healthbar-fill"></div></div>
   <div id="healthbar-label">100</div>

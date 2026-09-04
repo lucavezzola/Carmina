@@ -45,6 +45,7 @@ export function bootClient() {
   const healthFillEl = document.getElementById('healthbar-fill');
   const healthLabelEl = document.getElementById('healthbar-label');
   const damageVignetteEl = document.getElementById('damage-vignette');
+  const debugPanelEl = document.getElementById('debug-panel');
   let vignetteFadeTimeout = null;
 
   function flashDamageVignette(damageAmount) {
@@ -1075,6 +1076,45 @@ export function bootClient() {
   const overlay = document.getElementById('overlay');
   const crosshair = document.getElementById('crosshair');
   const hud = document.getElementById('hud');
+  let debugVisible = false;
+  let pingMs = null;
+  let lastPingSentAt = 0;
+  let lastPingId = 0;
+  let fps = 0;
+  let frameCount = 0;
+  let fpsWindowStartedAt = performance.now();
+
+  function toggleDebugPanel() {
+    debugVisible = !debugVisible;
+    debugPanelEl.style.display = debugVisible ? 'block' : 'none';
+    debugPanelEl.setAttribute('aria-hidden', String(!debugVisible));
+  }
+
+  function updateDebugPanel(now) {
+    if (!debugVisible) return;
+    const rendererInfo = renderer.info.render;
+    const pingText = pingMs === null ? '--' : `${Math.round(pingMs)} ms`;
+    const playerCount = Object.keys(remotePlayers).length + (mySlot === null ? 0 : 1);
+    debugPanelEl.textContent = [
+      'DEBUG  [F3 toggle]',
+      `FPS       ${fps.toFixed(1)}`,
+      `PING      ${pingText}`,
+      `PLAYERS   ${playerCount}`,
+      `POS       ${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}`,
+      `VIEW      ${innerWidth} x ${innerHeight} @${renderer.getPixelRatio().toFixed(1)}x`,
+      `DRAW      ${rendererInfo.calls} calls / ${rendererInfo.triangles} tris`,
+      `MEM       ${renderer.info.memory.geometries} geo / ${renderer.info.memory.textures} tex`,
+      `AUDIO     ${microphoneEnabled ? 'on' : 'off'}`,
+      `SOCKET    ${socket?.readyState === WebSocket.OPEN ? 'open' : 'closed'}`,
+    ].join('\n');
+  }
+
+  function sendPingIfDue(now) {
+    if (!socket || socket.readyState !== WebSocket.OPEN || now - lastPingSentAt < 1000) return;
+    lastPingSentAt = now;
+    lastPingId = now;
+    socket.send(JSON.stringify({ type: 'ping', id: lastPingId }));
+  }
 
   controls.addEventListener('lock', () => {
     overlay.style.display = 'none';
@@ -1096,6 +1136,11 @@ export function bootClient() {
   let horizontalMovementStartZ = 0;
 
   document.addEventListener('keydown', (e) => {
+    if (e.code === 'F3' && !e.repeat) {
+      e.preventDefault();
+      toggleDebugPanel();
+      return;
+    }
     if (e.code === 'KeyM' && !e.repeat) {
       setMicrophoneEnabled(!microphoneEnabled);
       return;
@@ -1681,11 +1726,17 @@ export function bootClient() {
     socket.onopen = () => {
       lastSentPosition = null;
       lastPositionSentAt = 0;
+      lastPingSentAt = 0;
       hud.textContent = 'Connesso al server...';
     };
 
     socket.onmessage = async (event) => {
       const message = JSON.parse(event.data);
+
+      if (message.type === 'pong' && message.id === lastPingId) {
+        pingMs = performance.now() - message.id;
+        return;
+      }
 
       if (message.type === 'welcome') {
         mySlot = message.your_slot;
@@ -1916,6 +1967,15 @@ export function bootClient() {
     updateMovement(delta);
     updateVerticalMovement(delta);
     sendPositionIfDue();
+    sendPingIfDue(now);
+
+    frameCount += 1;
+    if (now - fpsWindowStartedAt >= 500) {
+      fps = frameCount * 1000 / (now - fpsWindowStartedAt);
+      frameCount = 0;
+      fpsWindowStartedAt = now;
+    }
+    updateDebugPanel(now);
 
     localAnchor.position.set(
       camera.position.x,

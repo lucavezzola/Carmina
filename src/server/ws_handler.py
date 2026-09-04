@@ -112,6 +112,9 @@ async def handle_client(websocket, model, world_map):
                             "signal": signal,
                         })
 
+                elif data.get("type") == "ping":
+                    await websocket.send(json.dumps({"type": "pong", "id": data.get("id")}))
+
                 elif data.get("type") == "position":
                     player_state = players[slot]
                     player_state["x"] = data.get("x", player_state["x"])
