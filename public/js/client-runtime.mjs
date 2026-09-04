@@ -24,6 +24,11 @@ export function bootClient() {
   const ROTATION_CHANGE_THRESHOLD = 0.01;
   const REMOTE_LERP_FACTOR = 0.18;
   const VOICE_VOLUME_UPDATE_INTERVAL_MS = 100;
+  const FACE_BLINK_MIN_MS = 1800;
+  const FACE_BLINK_MAX_MS = 5200;
+  const FACE_BLINK_DURATION_MS = 130;
+  const FACE_TALK_PULSE_MIN_MS = 90;
+  const FACE_TALK_PULSE_MAX_MS = 260;
   const COOLDOWN_UPDATE_INTERVAL_MS = 50;
 
   const FIRE_DURATION_S = 5;
@@ -135,7 +140,8 @@ export function bootClient() {
       { height: 0, color: [0.40, 0.47, 0.27] },
       { height: 7, color: [0.33, 0.42, 0.24] },
       { height: 16, color: [0.46, 0.43, 0.38] },
-      { height: 28, color: [0.78, 0.78, 0.76] },
+      { height: 24, color: [0.58, 0.56, 0.52] },
+      { height: 34, color: [0.88, 0.88, 0.86] },
     ];
     for (let iz = 0; iz <= subdivisions; iz++) {
       for (let ix = 0; ix <= subdivisions; ix++) {
@@ -462,9 +468,21 @@ export function bootClient() {
     head.add(rightEye);
 
     group.add(head);
-  enableShadows(group);
+    enableShadows(group);
     scene.add(group);
-    return { group, bodyMaterial, head };
+    return {
+      group, bodyMaterial, head,
+      face: {
+        nose,
+        leftEye,
+        rightEye,
+        blinkStartedAt: -Infinity,
+        nextBlinkAt: performance.now() + FACE_BLINK_MIN_MS + Math.random() * (FACE_BLINK_MAX_MS - FACE_BLINK_MIN_MS),
+        talkPulseAt: 0,
+        talkPulse: 0,
+        painUntil: 0,
+      },
+    };
   }
 
   const localAnchor = new THREE.Object3D();
@@ -481,14 +499,17 @@ export function bootClient() {
     // Create a remote player and store its latest network target for interpolation.
     if (remotePlayers[slot]) return;
     const color = 0x4040ff + slot * 0x203040;
-    const { group, bodyMaterial, head } = createWizard(color);
+    const { group, bodyMaterial, head, face } = createWizard(color);
     group.position.set(x, groundY, z);
     group.rotation.y = yaw;
     head.rotation.x = pitch;
     remotePlayers[slot] = {
       group, bodyMaterial, head,
+      face,
       targetX: x, targetZ: z, targetGroundY: groundY, targetYaw: yaw, targetPitch: pitch,
       hp: MAX_HP,
+      voiceAnalyser: null,
+      voiceSamples: new Uint8Array(0),
     };
   }
 
@@ -566,6 +587,19 @@ export function bootClient() {
         remoteAudio[slot] = audio;
       }
       audio.srcObject = event.streams[0];
+      const player = remotePlayers[slot];
+      if (player && audioContext) {
+        try {
+          const source = audioContext.createMediaStreamSource(event.streams[0]);
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
+          player.voiceAnalyser = analyser;
+          player.voiceSamples = new Uint8Array(analyser.fftSize);
+        } catch (error) {
+          console.warn('Voice activity animation unavailable:', error);
+        }
+      }
     };
 
     connection.onconnectionstatechange = () => {
@@ -648,6 +682,51 @@ export function bootClient() {
     if (now - lastVoiceVolumeUpdateAt < VOICE_VOLUME_UPDATE_INTERVAL_MS) return;
     lastVoiceVolumeUpdateAt = now;
     updateVoiceVolumes();
+  }
+
+  function randomBetween(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function updateFaceAnimations(now) {
+    for (const slot in remotePlayers) {
+      const player = remotePlayers[slot];
+      const face = player.face;
+      let voiceLevel = 0;
+      if (player.voiceAnalyser && player.voiceSamples.length) {
+        player.voiceAnalyser.getByteTimeDomainData(player.voiceSamples);
+        let sum = 0;
+        for (const sample of player.voiceSamples) {
+          const normalized = (sample - 128) / 128;
+          sum += normalized * normalized;
+        }
+        voiceLevel = Math.sqrt(sum / player.voiceSamples.length);
+      }
+
+      if (voiceLevel > 0.035 && now >= face.talkPulseAt) {
+        face.talkPulse = randomBetween(0.35, 1);
+        face.talkPulseAt = now + randomBetween(FACE_TALK_PULSE_MIN_MS, FACE_TALK_PULSE_MAX_MS);
+      } else if (voiceLevel <= 0.035) {
+        face.talkPulse *= 0.86;
+      }
+      const targetNoseWidth = 1.5 + face.talkPulse * 0.9;
+      face.nose.scale.x += (targetNoseWidth - face.nose.scale.x) * 0.24;
+
+      if (now >= face.nextBlinkAt) {
+        face.blinkStartedAt = now;
+        face.nextBlinkAt = now + randomBetween(FACE_BLINK_MIN_MS, FACE_BLINK_MAX_MS);
+      }
+      const blinkProgress = (now - face.blinkStartedAt) / FACE_BLINK_DURATION_MS;
+      const blinking = blinkProgress >= 0 && blinkProgress < 1;
+      const pain = now < face.painUntil;
+      const eyeClose = pain ? 0.12 : (blinking ? 0.08 : 1);
+      face.leftEye.scale.y += (eyeClose - face.leftEye.scale.y) * 0.35;
+      face.rightEye.scale.y += (eyeClose - face.rightEye.scale.y) * 0.35;
+      const leftAngle = pain ? -0.65 : 0;
+      const rightAngle = pain ? 0.65 : 0;
+      face.leftEye.rotation.z += (leftAngle - face.leftEye.rotation.z) * 0.3;
+      face.rightEye.rotation.z += (rightAngle - face.rightEye.rotation.z) * 0.3;
+    }
   }
 
   function eyeHeightToGroundOffset(y) {
@@ -878,6 +957,7 @@ export function bootClient() {
   function flashDamage(player) {
     player.bodyMaterial.emissive.set(0xff0000);
     player.bodyMaterial.emissiveIntensity = 2.0;
+    player.face.painUntil = performance.now() + 420;
   }
 
   function castShield(anchor) {
@@ -1630,8 +1710,9 @@ export function bootClient() {
           myHp = message.hp;
           updateHealthBar(message.hp);
         } else if (remotePlayers[message.slot]) {
-          remotePlayers[message.slot].hp = message.hp;
-          flashDamage(remotePlayers[message.slot]);
+          const player = remotePlayers[message.slot];
+          if (message.hp < player.hp) flashDamage(player);
+          player.hp = message.hp;
         }
         return;
       }
@@ -1765,6 +1846,7 @@ export function bootClient() {
       if (shield) updateShield(shield);
     }
     updateShield(localAnchor.userData.shieldMesh);
+    updateFaceAnimations(now);
     updateVoiceVolumesIfDue(now);
     updateFireEffects(now);
 
