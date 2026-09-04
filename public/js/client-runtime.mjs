@@ -446,7 +446,7 @@ export function bootClient() {
     head.add(hat);
 
     const nose = new THREE.Mesh(
-      new THREE.SphereGeometry(0.1, 6, 6),
+      new THREE.SphereGeometry(0.1, 12, 12),
       new THREE.MeshStandardMaterial({ color: 0xf5b0b0 })
     );
     nose.position.z = -0.45;
