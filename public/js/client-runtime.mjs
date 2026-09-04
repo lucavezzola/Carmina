@@ -563,6 +563,7 @@ export function bootClient() {
   }
 
   let activeParticles = [];
+  let activeFires = [];
   const worldPosition = new THREE.Vector3();
 
   function spawnParticles(color, count, origin) {
@@ -692,44 +693,40 @@ export function bootClient() {
   }
 
   function castFire(casterSlot, durationMs) {
-    const startTime = performance.now();
-    const spawnIntervalMs = 90;
-    let lastSpawn = 0;
-
     const fireLight = new THREE.PointLight(SPELL_COLORS.fuoco, 2.5, 7);
     scene.add(fireLight);
-    
-    function tick() {
-      const elapsed = performance.now() - startTime;
-      
-      if (elapsed >= durationMs) {
-        scene.remove(fireLight);
-        return;
-      }
-      
-      const casterOrigin = getCasterOrigin(casterSlot);
-      const { yaw, pitch } = getCasterOrientation(casterSlot);
-      const fireForward = forwardVector(yaw, pitch);
+    activeFires.push({
+      casterSlot,
+      durationMs,
+      startedAt: performance.now(),
+      lastSpawnAt: 0,
+      fireLight,
+    });
+  }
 
+  function updateFireEffects(now) {
+    activeFires = activeFires.filter((fire) => {
+      const elapsed = now - fire.startedAt;
+      if (elapsed >= fire.durationMs) {
+        scene.remove(fire.fireLight);
+        return false;
+      }
+
+      const casterOrigin = getCasterOrigin(fire.casterSlot);
+      const { yaw, pitch } = getCasterOrientation(fire.casterSlot);
+      const fireForward = forwardVector(yaw, pitch);
       const up = Math.abs(fireForward.y) > 0.99
         ? new THREE.Vector3(1, 0, 0)
         : new THREE.Vector3(0, 1, 0);
+      const right = new THREE.Vector3().crossVectors(fireForward, up).normalize();
+      const trueUp = new THREE.Vector3().crossVectors(right, fireForward).normalize();
 
-      const right = new THREE.Vector3()
-        .crossVectors(fireForward, up)
-        .normalize();
-
-      const trueUp = new THREE.Vector3()
-        .crossVectors(right, fireForward)
-        .normalize();
-      
-      fireLight.position
+      fire.fireLight.position
         .copy(casterOrigin)
         .addScaledVector(fireForward, FIRE_DEPTH * 0.5);
 
-      if (elapsed - lastSpawn >= spawnIntervalMs) {
-        lastSpawn = elapsed;
-
+      if (elapsed - fire.lastSpawnAt >= 90) {
+        fire.lastSpawnAt = elapsed;
         spawnConeParticles(
           SPELL_COLORS.fuoco,
           14,
@@ -738,13 +735,10 @@ export function bootClient() {
           right,
           trueUp
         );
-
-        fireLight.intensity = 1.8 + Math.random() * 1.4;
+        fire.fireLight.intensity = 1.8 + Math.random() * 1.4;
       }
-
-      requestAnimationFrame(tick);
-    }
-    tick();
+      return true;
+    });
   }
 
   function spawnConeParticles(color, count, origin, forward, right, up) {
@@ -1556,6 +1550,7 @@ export function bootClient() {
     }
     updateShield(localAnchor.userData.shieldMesh);
     updateVoiceVolumesIfDue(now);
+    updateFireEffects(now);
 
     activeParticles = activeParticles.filter((p) => {
       const age = now - p.born;
