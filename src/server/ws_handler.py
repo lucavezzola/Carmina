@@ -3,6 +3,7 @@
 This module owns the per-client lifecycle and the Vosk recognizer state.
 """
 
+import asyncio
 import json
 
 import websockets
@@ -28,8 +29,7 @@ async def handle_client(websocket, model, world_map):
         await websocket.close()
         return
 
-    partial_checked_until = 0
-    max_spell_length = max(map(len, SPELLS_LIST))
+    detected_in_utterance = set()
 
     print(f"Client connesso: {websocket.remote_address}")
     recognizer = KaldiRecognizer(model, SAMPLE_RATE)
@@ -37,7 +37,6 @@ async def handle_client(websocket, model, world_map):
     players[slot] = {
         "websocket": websocket,
         "recognizer": recognizer,
-        "last_recognized": None,
         "last_cast": {word: 0.0 for word in SPELLS_LIST},
         "x": spawn_x,
         "y": spawn_y,
@@ -80,21 +79,23 @@ async def handle_client(websocket, model, world_map):
                 rec = player_state["recognizer"]
 
                 if rec.AcceptWaveform(message):
-                    rec.Result()
-                    partial_checked_until = 0
-                    player_state["last_recognized"] = None
+                    result = json.loads(rec.Result())
+                    recognized_text = result.get("text", "")
+                    for match in find_spell_matches(recognized_text):
+                        word = match.group(1).lower()
+                        if word in detected_in_utterance:
+                            continue
+                        detected_in_utterance.add(word)
+                        asyncio.create_task(try_spell(slot, word))
+                    detected_in_utterance.clear()
                 else:
-                    partial_text = json.loads(rec.PartialResult()).get("partial", "").strip()
-                    if len(partial_text) < partial_checked_until:
-                        partial_checked_until = 0
-                    scan_from = max(0, partial_checked_until - max_spell_length + 1)
-                    new_partial = partial_text[scan_from:]
-                    for match in find_spell_matches(new_partial):
-                        if scan_from + match.end() > partial_checked_until:
-                            word = match.group(1)
-                            await try_spell(slot, word)
-                            player_state["last_recognized"] = word
-                    partial_checked_until = len(partial_text)
+                    partial_text = json.loads(rec.PartialResult()).get("partial", "")
+                    for match in find_spell_matches(partial_text):
+                        word = match.group(1).lower()
+                        if word in detected_in_utterance:
+                            continue
+                        detected_in_utterance.add(word)
+                        asyncio.create_task(try_spell(slot, word))
 
             else:
                 try:

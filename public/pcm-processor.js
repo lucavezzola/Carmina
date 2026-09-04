@@ -16,6 +16,17 @@ class PCMProcessor extends AudioWorkletProcessor {
     this.bufferLength = 0;
   }
 
+  flushBuffer() {
+    if (this.bufferLength === 0) return;
+    const int16 = new Int16Array(this.bufferLength);
+    for (let sampleIndex = 0; sampleIndex < this.bufferLength; sampleIndex++) {
+      const value = Math.max(-1, Math.min(1, this.buffer[sampleIndex]));
+      int16[sampleIndex] = value < 0 ? value * 0x8000 : value * 0x7fff;
+    }
+    this.port.postMessage(int16.buffer, [int16.buffer]);
+    this.bufferLength = 0;
+  }
+
   process(inputs) {
     const input = inputs[0];
     if (!input || input.length === 0) return true;
@@ -41,15 +52,12 @@ class PCMProcessor extends AudioWorkletProcessor {
       this.buffer[this.bufferLength++] = sample;
       this.remainingHangoverSamples--;
 
-      if (this.bufferLength < this.buffer.length) continue;
-      const int16 = new Int16Array(this.bufferLength);
-      for (let sampleIndex = 0; sampleIndex < this.bufferLength; sampleIndex++) {
-        const value = Math.max(-1, Math.min(1, this.buffer[sampleIndex]));
-        int16[sampleIndex] = value < 0 ? value * 0x8000 : value * 0x7fff;
-      }
-      this.port.postMessage(int16.buffer, [int16.buffer]);
-      this.bufferLength = 0;
+      if (this.bufferLength >= this.buffer.length) this.flushBuffer();
     }
+
+    // Send the final voice fragment as soon as the hangover expires. This
+    // never adds silence, but prevents it waiting for the next utterance.
+    if (this.remainingHangoverSamples <= 0) this.flushBuffer();
 
     return true;
   }
