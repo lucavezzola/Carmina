@@ -14,7 +14,8 @@ This project uses a single JSON world file:
     { "type": "building", "x": -18, "y": 2.0, "z": -12, "width": 7, "height": 5, "depth": 7, "color": 123456 },
     { "type": "column", "x": 20, "y": 8.5, "z": 6, "radius": 1.0, "height": 6, "rotation": {"x": 0, "y": 0, "z": 0}, "color": 123456 },
     { "type": "platform", "x": 0, "y": 10, "z": 30, "width": 8, "height": 0.8, "depth": 8, "color": 123123 },
-    { "type": "ramp", "x": -15, "y": 6.5, "z": 22, "width": 8, "height": 1.2, "depth": 14, "rotation": {"x": 0.35, "y": 0, "z": 0}, "color": 876543 }
+    { "type": "ramp", "x": -15, "y": 6.5, "z": 22, "width": 8, "height": 1.2, "depth": 14, "rotation": {"x": 0.35, "y": 0, "z": 0}, "color": 876543 },
+    { "type": "water", "x": 20, "y": 0.5, "z": 12, "width": 24, "depth": 10, "color": 4037833, "opacity": 0.62 }
   ]
 }
 ```
@@ -29,6 +30,7 @@ This project uses a single JSON world file:
 - Buildings and platforms are box colliders.
 - Columns are cylinder colliders.
 - Ramps are rotated boxes.
+- Water is a stationary, non-collidable rectangular surface for rivers and lakes.
 - The client rebuilds the world from this JSON using Three.js.
 
 ## Supported object types
@@ -38,6 +40,7 @@ This project uses a single JSON world file:
 - `platform`: { "type": "platform", "x": 0, "y": 10, "z": 0, "width": 8, "height": 0.8, "depth": 8, "color": 123456 }
 - `column`: { "type": "column", "x": 20, "y": 8.5, "z": 6, "radius": 1.0, "height": 6, "rotation": {"x": 0, "y": 0, "z": 0}, "color": 123456 }
 - `ramp`: { "type": "ramp", "x": 30, "y": 7.8, "z": 5, "width": 10, "height": 1.2, "depth": 16, "rotation": {"x": 0.25, "y": 0, "z": 0}, "color": 987654 }
+- `water`: { "type": "water", "x": 20, "y": 0.5, "z": 12, "width": 24, "depth": 10, "color": 4037833, "opacity": 0.62 }
 
 ## Important generation rules
 

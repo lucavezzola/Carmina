@@ -379,6 +379,26 @@ export function bootClient() {
     });
   }
 
+  function createWater(x, y, z, width, depth, color, opacity) {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.18,
+        metalness: 0.08,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x, y + 0.025, z);
+    mesh.renderOrder = 2;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+
   function buildWorldFromServer(worldMap) {
     // The server owns layout; this function only turns its object records into client geometry.
     buildTerrain(worldMap.terrain);
@@ -393,6 +413,8 @@ export function bootClient() {
         createColumn(object.x, object.y, object.z, object.radius, object.height, object.rotation, object.color);
       } else if (object.type === 'ramp') {
         createRotatedBox(object.x, object.y, object.z, object.width, object.height, object.depth, object.rotation, object.color);
+      } else if (object.type === 'water') {
+        createWater(object.x, object.y, object.z, object.width, object.depth, object.color, object.opacity);
       }
     }
   }
