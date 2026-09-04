@@ -1,10 +1,12 @@
-export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.com' } = {}) {
+import { WSS_URL } from './client-config.mjs';
+
+export function bootClient() {
   // Prevent duplicate listeners and animation loops if the module is loaded twice.
   if (window.__carminaClientBooted) return;
   window.__carminaClientBooted = true;
 
   // Gameplay constants are kept here so movement, collision, and spell effects use one scale.
-  const WS_URL = wsUrl;
+  const WS_URL = WSS_URL;
   const MOVE_SPEED = 8.0;
   const ACCELERATION = 20.0;
   const FRICTION = 10.0;
@@ -403,6 +405,20 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     return player ? { yaw: player.group.rotation.y, pitch: player.head.rotation.x } : { yaw: 0, pitch: 0 };
   }
 
+  function getCasterOrigin(slot) {
+    if (slot === mySlot) {
+      return camera.position.clone();
+    }
+
+    const anchor = getEffectAnchor(slot);
+    if (!anchor) return new THREE.Vector3();
+
+    const origin = new THREE.Vector3();
+    anchor.getWorldPosition(origin);
+    origin.y += EYE_HEIGHT - BODY_HEIGHT;
+    return origin;
+  }
+
   function generateJaggedPoints(start, end, segments, jitter) {
     const points = [];
     for (let i = 0; i <= segments; i++) {
@@ -479,33 +495,57 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
     if (targetAnchor) spawnParticles(SPELL_COLORS.fulmine, 20, endPoint);
   }
 
-  function castFire(origin, forward, durationMs) {
-    // Keep spawning cone-shaped fire particles until the spell duration expires.
-    const up = Math.abs(forward.y) > 0.99 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-    const right = new THREE.Vector3().crossVectors(forward, up).normalize();
-    const trueUp = new THREE.Vector3().crossVectors(right, forward).normalize();
-
-    const fireLight = new THREE.PointLight(SPELL_COLORS.fuoco, 2.5, 7);
-    fireLight.position.copy(origin).addScaledVector(forward, FIRE_DEPTH * 0.5);
-    fireLight.position.y += 0.4;
-    scene.add(fireLight);
-
+  function castFire(casterSlot, durationMs) {
     const startTime = performance.now();
     const spawnIntervalMs = 90;
     let lastSpawn = 0;
 
+    const fireLight = new THREE.PointLight(SPELL_COLORS.fuoco, 2.5, 7);
+    scene.add(fireLight);
+    
     function tick() {
       const elapsed = performance.now() - startTime;
+      
       if (elapsed >= durationMs) {
         scene.remove(fireLight);
         return;
       }
+      
+      const casterOrigin = getCasterOrigin(casterSlot);
+      const { yaw, pitch } = getCasterOrientation(casterSlot);
+      const fireForward = forwardVector(yaw, pitch);
+
+      const up = Math.abs(fireForward.y) > 0.99
+        ? new THREE.Vector3(1, 0, 0)
+        : new THREE.Vector3(0, 1, 0);
+
+      const right = new THREE.Vector3()
+        .crossVectors(fireForward, up)
+        .normalize();
+
+      const trueUp = new THREE.Vector3()
+        .crossVectors(right, fireForward)
+        .normalize();
+      
+      fireLight.position
+        .copy(casterOrigin)
+        .addScaledVector(fireForward, FIRE_DEPTH * 0.5);
+
       if (elapsed - lastSpawn >= spawnIntervalMs) {
         lastSpawn = elapsed;
-        spawnConeParticles(SPELL_COLORS.fuoco, 14, origin, forward, right, trueUp);
+
+        spawnConeParticles(
+          SPELL_COLORS.fuoco,
+          14,
+          casterOrigin,
+          fireForward,
+          right,
+          trueUp
+        );
+
         fireLight.intensity = 1.8 + Math.random() * 1.4;
-        fireLight.position.y = origin.y + 0.3 + Math.random() * 0.2;
       }
+
       requestAnimationFrame(tick);
     }
     tick();
@@ -592,7 +632,9 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
   }
 
   // Pointer lock controls connect mouse look and keyboard movement to the camera.
-  const controls = new THREE.PointerLockControls(camera, document.body);
+  // Use the actual rendered surface, not document.body, to avoid invalid-document lock errors.
+  const pointerLockTarget = canvas || document.body;
+  const controls = new THREE.PointerLockControls(camera, pointerLockTarget);
   const overlay = document.getElementById('overlay');
   const crosshair = document.getElementById('crosshair');
   const hud = document.getElementById('hud');
@@ -961,11 +1003,22 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
 
   function requestPointerLock() {
     // Delay the browser lock request slightly so it follows the user gesture reliably.
-    if (document.pointerLockElement === document.body || pointerLockRequestPending) return;
+    if (!pointerLockTarget || pointerLockRequestPending) return;
+    if (document.pointerLockElement === pointerLockTarget) return;
+
     pointerLockRequestPending = true;
     setTimeout(() => {
-      controls.lock();
-      pointerLockRequestPending = false;
+      try {
+        if (typeof pointerLockTarget.requestPointerLock === 'function') {
+          pointerLockTarget.requestPointerLock();
+        } else {
+          controls.lock();
+        }
+      } catch (error) {
+        console.warn('Pointer lock unavailable for the current target element:', error);
+      } finally {
+        pointerLockRequestPending = false;
+      }
     }, 40);
   }
 
@@ -1103,11 +1156,15 @@ export function bootClient({ wsUrl = 'wss://track-hills-nsw-href.trycloudflare.c
           castLightning(anchor, forward, targetAnchor);
         } else if (message.word === 'fuoco') {
           const material = getBodyMaterial(anchor);
-          if (material) { material.emissive.set(SPELL_COLORS.fuoco); material.emissiveIntensity = 1.6; }
-
-          const origin = new THREE.Vector3(message.origin.x, message.origin.y, message.origin.z);
-          const fireForward = forwardVector(message.yaw, message.pitch);
-          castFire(origin, fireForward, (message.duration || FIRE_DURATION_S) * 1000);
+          if (material) {
+            material.emissive.set(SPELL_COLORS.fuoco);
+            material.emissiveIntensity = 1.6;
+          }
+          
+          castFire(
+            message.slot,
+            (message.duration || FIRE_DURATION_S) * 1000
+          );
         } else if (message.word === 'scudo') {
           castShield(anchor);
         }

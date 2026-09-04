@@ -138,13 +138,31 @@ async def respawn_after_delay(slot):
     })
 
 
-async def run_fire_effect(caster_slot, origin, forward):
-    """Apply fire cone damage once per configured effect tick."""
+async def run_fire_effect(caster_slot):
+    """Apply fire breath damage using the caster's current position and aim."""
     ticks = int(FIRE_DURATION_S / FIRE_TICK_INTERVAL_S)
+    
     for i in range(ticks):
-        targets = find_fire_targets_static(origin, forward, exclude_slot=caster_slot)
+        caster = players.get(caster_slot)
+        if caster is None:
+            return
+        
+        origin = (
+            caster["x"],
+            caster["y"],
+            caster["z"],
+        )
+        forward = forward_vector(caster["yaw"], caster["pitch"])
+        
+        targets = find_fire_targets_static(
+            origin,
+            forward,
+            exclude_slot=caster_slot,
+        )
+        
         for target_slot in targets:
             await apply_damage(target_slot, FIRE_TICK_DAMAGE)
+            
         if i < ticks - 1:
             await asyncio.sleep(FIRE_TICK_INTERVAL_S)
 
@@ -174,16 +192,11 @@ async def try_spell(slot, word):
         return
 
     if word == "fuoco":
-        origin = (player_state["x"], player_state["y"], player_state["z"])
-        forward = forward_vector(player_state["yaw"], player_state["pitch"])
         await send_all({
             "type": "spell",
             "slot": slot,
             "word": word,
-            "origin": {"x": origin[0], "y": origin[1], "z": origin[2]},
-            "yaw": player_state["yaw"],
-            "pitch": player_state["pitch"],
             "duration": FIRE_DURATION_S,
         })
-        asyncio.create_task(run_fire_effect(slot, origin, forward))
+        asyncio.create_task(run_fire_effect(slot))
         return
