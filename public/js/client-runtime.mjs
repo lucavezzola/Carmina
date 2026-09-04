@@ -145,6 +145,53 @@ export function bootClient() {
 
   // Every collidable world object is represented by a compact local collision descriptor.
   const obstacles = [];
+  const obstacleGrid = new Map();
+  const OBSTACLE_CELL_SIZE = 16;
+  const COLLISION_QUERY_RADIUS = 16 + PLAYER_RADIUS;
+
+  function obstacleCellKey(cellX, cellZ) {
+    return `${cellX},${cellZ}`;
+  }
+
+  function registerObstacle(obstacle) {
+    obstacle.broadphaseRadius = obstacle.broadphaseRadius
+      ?? (obstacle.type === 'box'
+        ? Math.hypot(obstacle.halfWidth, obstacle.halfDepth)
+        : obstacle.radius || 0);
+    obstacles.push(obstacle);
+
+    const minCellX = Math.floor((obstacle.x - obstacle.broadphaseRadius) / OBSTACLE_CELL_SIZE);
+    const maxCellX = Math.floor((obstacle.x + obstacle.broadphaseRadius) / OBSTACLE_CELL_SIZE);
+    const minCellZ = Math.floor((obstacle.z - obstacle.broadphaseRadius) / OBSTACLE_CELL_SIZE);
+    const maxCellZ = Math.floor((obstacle.z + obstacle.broadphaseRadius) / OBSTACLE_CELL_SIZE);
+    for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+      for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+        const key = obstacleCellKey(cellX, cellZ);
+        let cell = obstacleGrid.get(key);
+        if (!cell) {
+          cell = [];
+          obstacleGrid.set(key, cell);
+        }
+        cell.push(obstacle);
+      }
+    }
+  }
+
+  function nearbyObstacles(x, z) {
+    const minCellX = Math.floor((x - COLLISION_QUERY_RADIUS) / OBSTACLE_CELL_SIZE);
+    const maxCellX = Math.floor((x + COLLISION_QUERY_RADIUS) / OBSTACLE_CELL_SIZE);
+    const minCellZ = Math.floor((z - COLLISION_QUERY_RADIUS) / OBSTACLE_CELL_SIZE);
+    const maxCellZ = Math.floor((z + COLLISION_QUERY_RADIUS) / OBSTACLE_CELL_SIZE);
+    const nearby = new Set();
+    for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+      for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+        const cell = obstacleGrid.get(obstacleCellKey(cellX, cellZ));
+        if (!cell) continue;
+        for (const obstacle of cell) nearby.add(obstacle);
+      }
+    }
+    return nearby;
+  }
 
   function ensureObstacleTransform(o) {
     // Older map objects may not include rotation data, so default them to identity transforms.
@@ -182,7 +229,7 @@ export function bootClient() {
 
     const quaternion = new THREE.Quaternion();
     const invQuaternion = quaternion.clone().invert();
-    obstacles.push({
+    registerObstacle({
       type: 'cylinder',
       x, y, z,
       quaternion, invQuaternion,
@@ -206,7 +253,7 @@ export function bootClient() {
 
     const quaternion = new THREE.Quaternion();
     const invQuaternion = quaternion.clone().invert();
-    obstacles.push({
+    registerObstacle({
       type: 'box',
       x, y: boxCenterY, z,
       quaternion, invQuaternion,
@@ -232,7 +279,7 @@ export function bootClient() {
     mesh.quaternion.copy(quaternion);
     scene.add(mesh);
 
-    obstacles.push({
+    registerObstacle({
       type: 'box', x, y, z, quaternion, invQuaternion,
       halfWidth: width / 2, halfHeight: height / 2, halfDepth: depth / 2,
     });
@@ -250,7 +297,7 @@ export function bootClient() {
     mesh.quaternion.copy(quaternion);
     scene.add(mesh);
 
-    obstacles.push({
+    registerObstacle({
       type: 'cylinder', x, y, z, quaternion, invQuaternion,
       radius, halfHeight: height / 2,
     });
@@ -845,7 +892,7 @@ export function bootClient() {
   function groundHeightAt(x, z) {
     // Return the highest valid downward surface at a horizontal position.
     let height = terrainHeightAt(x, z);
-    for (const o of obstacles) {
+    for (const o of nearbyObstacles(x, z)) {
       const resolver = SURFACE_HEIGHT_RESOLVERS[o.type];
       if (!resolver) continue;
       const h = resolver(o, x, z);
@@ -1086,7 +1133,7 @@ export function bootClient() {
 
   function resolveHorizontalCollisions(feetHeight) {
     // Run the type-specific horizontal collision resolver for every world obstacle.
-    for (const o of obstacles) {
+    for (const o of nearbyObstacles(camera.position.x, camera.position.z)) {
       const resolver = COLLISION_RESOLVERS[o.type];
       if (resolver) resolver(o, feetHeight);
     }
@@ -1103,7 +1150,7 @@ export function bootClient() {
     camera.position.y += verticalVelocity * delta;
 
     const currentFeetHeight = camera.position.y - EYE_HEIGHT;
-    for (const o of obstacles) {
+    for (const o of nearbyObstacles(camera.position.x, camera.position.z)) {
       const resolver = o.type === 'box' ? rayUpHeightOnBox : rayUpHeightOnCylinder;
       if (!resolver) continue;
       const undersideY = resolver(o, camera.position.x, camera.position.z);
@@ -1118,7 +1165,7 @@ export function bootClient() {
     }
 
     if (verticalVelocity > 0) {
-      for (const o of obstacles) {
+      for (const o of nearbyObstacles(camera.position.x, camera.position.z)) {
         const resolver = o.type === 'box' ? rayUpHeightOnBox : rayUpHeightOnCylinder;
         if (!resolver) continue;
         const undersideY = resolver(o, camera.position.x, camera.position.z);
@@ -1135,7 +1182,7 @@ export function bootClient() {
 
     let supportHeight = terrainHeightAt(camera.position.x, camera.position.z);
     if (verticalVelocity <= 0) {
-      for (const o of obstacles) {
+      for (const o of nearbyObstacles(camera.position.x, camera.position.z)) {
         const resolver = SURFACE_HEIGHT_RESOLVERS[o.type];
         if (!resolver) continue;
         const surfaceY = resolver(o, camera.position.x, camera.position.z);
