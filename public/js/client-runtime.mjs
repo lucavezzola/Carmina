@@ -1035,28 +1035,40 @@ export function bootClient() {
   }
 
   // Cooldowns are client-side presentation; the server remains authoritative for spell rules.
-  const lastLocalCast = { fulmine: 0, scudo: 0, fuoco: 0, porta: 0 };
+  const cooldownDurationsMs = { ...SPELLS_COOLDOWNS };
+  const cooldownUntilLocalMs = { fulmine: 0, scudo: 0, fuoco: 0, porta: 0 };
+  let serverClockOffsetMs = 0;
   const cooldownBars = {};
   document.querySelectorAll('.fill').forEach((el) => {
     cooldownBars[el.dataset.spell] = el;
   });
 
   function updateCooldownBars() {
-    const now = performance.now();
     for (const name in cooldownBars) {
       if (!cooldownBars[name]) continue;
-      const fraction = Math.min((now - lastLocalCast[name]) / SPELLS_COOLDOWNS[name], 1);
+      const duration = cooldownDurationsMs[name] || SPELLS_COOLDOWNS[name];
+      const remaining = Math.max(0, cooldownUntilLocalMs[name] - Date.now());
+      const fraction = cooldownUntilLocalMs[name] > 0
+        ? Math.min(1, Math.max(0, 1 - remaining / duration))
+        : 1;
       cooldownBars[name].style.transform = `scaleX(${fraction})`;
+      const card = cooldownBars[name].closest('.spell');
+      const cooling = remaining > 0 && !(name === 'porta' && teleportArmed);
+      if (card) card.classList.toggle('cooling', cooling);
+      const status = document.querySelector(`[data-spell-status="${name}"]`);
+      if (status && !(name === 'porta' && teleportArmed)) {
+        status.textContent = remaining > 0 ? `${Math.ceil(remaining / 1000)}s` : '';
+      }
     }
-    const portaStatus = document.querySelector('[data-porta-status]');
+    const portaStatus = document.querySelector('[data-spell-status="porta"]');
     const portaCard = document.querySelector('.spell.porta');
     if (portaStatus && portaCard) {
       portaCard.classList.toggle('armed', teleportArmed);
       if (teleportArmed) {
         portaStatus.textContent = 'PORTA ARMATA';
       } else {
-        const remaining = Math.max(0, SPELLS_COOLDOWNS.porta - (now - lastLocalCast.porta));
-        portaStatus.textContent = remaining > 0 ? `${Math.ceil(remaining / 1000)}s` : 'Pronto';
+        const remaining = Math.max(0, cooldownUntilLocalMs.porta - Date.now());
+        portaStatus.textContent = remaining > 0 ? `${Math.ceil(remaining / 1000)}s` : '';
       }
     }
   }
@@ -1078,6 +1090,7 @@ export function bootClient() {
   const hud = document.getElementById('hud');
   let debugVisible = false;
   let pingMs = null;
+  let latestPartialTranscript = '';
   let lastPingSentAt = 0;
   let lastPingId = 0;
   let fps = 0;
@@ -1105,6 +1118,7 @@ export function bootClient() {
       `DRAW      ${rendererInfo.calls} calls / ${rendererInfo.triangles} tris`,
       `MEM       ${renderer.info.memory.geometries} geo / ${renderer.info.memory.textures} tex`,
       `AUDIO     ${microphoneEnabled ? 'on' : 'off'}`,
+      `VOICE     ${latestPartialTranscript || '--'}`,
       `SOCKET    ${socket?.readyState === WebSocket.OPEN ? 'open' : 'closed'}`,
     ].join('\n');
   }
@@ -1738,8 +1752,17 @@ export function bootClient() {
         return;
       }
 
+      if (message.type === 'voice_partial') {
+        latestPartialTranscript = message.text || '';
+        return;
+      }
+
       if (message.type === 'welcome') {
         mySlot = message.your_slot;
+        serverClockOffsetMs = (message.server_time_ms || Date.now()) - Date.now();
+        if (message.spell_cooldowns_ms) {
+          Object.assign(cooldownDurationsMs, message.spell_cooldowns_ms);
+        }
         camera.position.set(message.spawn_x, message.spawn_y, message.spawn_z);
         buildWorldFromServer(message.world_map);
         updateHealthBar(MAX_HP);
@@ -1784,6 +1807,10 @@ export function bootClient() {
       if (message.type === 'spell') {
         const anchor = getEffectAnchor(message.slot);
         if (!anchor) return;
+        if (message.slot === mySlot && message.cooldown_ms) {
+          cooldownDurationsMs[message.word] = message.cooldown_ms;
+          cooldownUntilLocalMs[message.word] = (message.cooldown_until_ms || 0) - serverClockOffsetMs;
+        }
 
         if (message.word === 'porta') {
           if (message.phase === 'set') {
@@ -1796,7 +1823,6 @@ export function bootClient() {
           }
           if (message.phase === 'teleport') {
             if (message.slot === mySlot) {
-              lastLocalCast.porta = performance.now();
               teleportArmed = false;
               clearTeleportMarker();
             }
@@ -1819,8 +1845,6 @@ export function bootClient() {
           }
           return;
         }
-
-        if (message.slot === mySlot) lastLocalCast[message.word] = performance.now();
 
         const { yaw, pitch } = getCasterOrientation(message.slot);
         const forward = forwardVector(yaw, pitch);
@@ -1910,6 +1934,12 @@ export function bootClient() {
       processorOptions: { targetSampleRate: 16000, inputSampleRate: audioContext.sampleRate }
     });
     workletNode.port.onmessage = (event) => {
+      if (event.data && typeof event.data === 'object' && !(event.data instanceof ArrayBuffer)) {
+        if (event.data.type === 'voice_end' && socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'voice_end' }));
+        }
+        return;
+      }
       if (microphoneEnabled && socket && socket.readyState === WebSocket.OPEN) {
         socket.send(event.data);
       }

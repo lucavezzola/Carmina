@@ -5,12 +5,13 @@ This module owns the per-client lifecycle and the Vosk recognizer state.
 
 import asyncio
 import json
+import time
 
 import websockets
 from vosk import KaldiRecognizer
 
 from .combat import try_spell
-from .config import MAX_HP, SAMPLE_RATE, SPELLS_LIST, players
+from .config import MAX_HP, SAMPLE_RATE, SPELLS_LIST, effective_cooldown_ms, players
 from .network import send_all, send_to
 from .players import spawn_position
 from .voice import find_spell_matches
@@ -30,6 +31,7 @@ async def handle_client(websocket, model, world_map):
         return
 
     detected_in_utterance = set()
+    last_partial_sent = None
 
     print(f"Client connesso: {websocket.remote_address}")
     recognizer = KaldiRecognizer(model, SAMPLE_RATE)
@@ -60,6 +62,9 @@ async def handle_client(websocket, model, world_map):
         "spawn_z": spawn_z,
         "players": existing_players,
         "world_map": world_map,
+        "spell_cooldowns_ms": {word: effective_cooldown_ms(word) for word in SPELLS_LIST},
+        "spell_cooldowns_seconds": {word: effective_cooldown_ms(word) / 1000 for word in SPELLS_LIST},
+        "server_time_ms": int(time.time() * 1000),
     }))
 
     await send_all({
@@ -79,23 +84,27 @@ async def handle_client(websocket, model, world_map):
                 rec = player_state["recognizer"]
 
                 if rec.AcceptWaveform(message):
-                    result = json.loads(rec.Result())
-                    recognized_text = result.get("text", "")
-                    for match in find_spell_matches(recognized_text):
-                        word = match.group(1).lower()
-                        if word in detected_in_utterance:
-                            continue
-                        detected_in_utterance.add(word)
-                        asyncio.create_task(try_spell(slot, word))
+                    # Final transcription is intentionally ignored: spells must only
+                    # trigger from partial results, never from delayed final audio.
+                    rec.Result()
                     detected_in_utterance.clear()
+                    if last_partial_sent:
+                        last_partial_sent = None
+                        asyncio.create_task(send_to(slot, {"type": "voice_partial", "text": ""}))
                 else:
                     partial_text = json.loads(rec.PartialResult()).get("partial", "")
-                    for match in find_spell_matches(partial_text):
+                    if partial_text != last_partial_sent:
+                        last_partial_sent = partial_text
+                        asyncio.create_task(send_to(slot, {"type": "voice_partial", "text": partial_text}))
+                    # Partial text is cumulative. Only the newest unseen match
+                    # may cast, preventing a backlog from firing all at once.
+                    for match in reversed(find_spell_matches(partial_text)):
                         word = match.group(1).lower()
                         if word in detected_in_utterance:
                             continue
                         detected_in_utterance.add(word)
                         asyncio.create_task(try_spell(slot, word))
+                        break
 
             else:
                 try:
@@ -115,6 +124,15 @@ async def handle_client(websocket, model, world_map):
 
                 elif data.get("type") == "ping":
                     await websocket.send(json.dumps({"type": "pong", "id": data.get("id")}))
+
+                elif data.get("type") == "voice_end":
+                    # Start the next phrase with a fresh Vosk context; otherwise
+                    # old partial words can reappear on the next sound.
+                    player_state = players[slot]
+                    player_state["recognizer"].Reset()
+                    detected_in_utterance.clear()
+                    last_partial_sent = None
+                    asyncio.create_task(send_to(slot, {"type": "voice_partial", "text": ""}))
 
                 elif data.get("type") == "position":
                     player_state = players[slot]

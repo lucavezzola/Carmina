@@ -12,12 +12,15 @@ class PCMProcessor extends AudioWorkletProcessor {
     this.voiceThreshold = opts.voiceThreshold || 0.01;
     this.hangoverSamples = Math.floor(this.targetSampleRate * (opts.hangoverMs || 300) / 1000);
     this.remainingHangoverSamples = 0;
-    this.buffer = new Float32Array(4096);
+    this.voiceActive = false;
+    // Keep recognition latency short; the server receives the final fragment
+    // through flushBuffer() when the voice hangover expires.
+    this.buffer = new Float32Array(1024);
     this.bufferLength = 0;
   }
 
   flushBuffer() {
-    if (this.bufferLength === 0) return;
+    if (this.bufferLength === 0) return false;
     const int16 = new Int16Array(this.bufferLength);
     for (let sampleIndex = 0; sampleIndex < this.bufferLength; sampleIndex++) {
       const value = Math.max(-1, Math.min(1, this.buffer[sampleIndex]));
@@ -25,6 +28,7 @@ class PCMProcessor extends AudioWorkletProcessor {
     }
     this.port.postMessage(int16.buffer, [int16.buffer]);
     this.bufferLength = 0;
+    return true;
   }
 
   process(inputs) {
@@ -39,6 +43,7 @@ class PCMProcessor extends AudioWorkletProcessor {
     const rms = Math.sqrt(sumSquares / channelData.length);
     if (rms >= this.voiceThreshold) {
       this.remainingHangoverSamples = this.hangoverSamples;
+      this.voiceActive = true;
     }
 
     // Downsampling "nearest neighbour": prende un campione ogni `ratio`.
@@ -57,7 +62,13 @@ class PCMProcessor extends AudioWorkletProcessor {
 
     // Send the final voice fragment as soon as the hangover expires. This
     // never adds silence, but prevents it waiting for the next utterance.
-    if (this.remainingHangoverSamples <= 0) this.flushBuffer();
+    if (this.remainingHangoverSamples <= 0 && this.voiceActive) {
+      this.flushBuffer();
+      this.voiceActive = false;
+      // This is a control event, not silent audio. It lets the server start
+      // a fresh phrase without padding the recognizer with silence.
+      this.port.postMessage({ type: "voice_end" });
+    }
 
     return true;
   }

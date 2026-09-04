@@ -200,6 +200,8 @@ async def try_spell(slot, word):
         player_state["teleport_target"] = None
         await send_all({
             "type": "spell", "slot": slot, "word": word, "phase": "teleport",
+                "cooldown_ms": effective_cooldown_ms(word),
+                "cooldown_until_ms": int(time.time() * 1000 + effective_cooldown_ms(word)),
             "x": player_state["x"], "y": player_state["y"], "z": player_state["z"],
         })
         await send_all({
@@ -217,12 +219,20 @@ async def try_spell(slot, word):
 
     if word == "scudo":
         player_state["shielded_until"] = now + SHIELD_DURATION_MS
-        await send_all({"type": "spell", "slot": slot, "word": word})
+        await send_all({
+            "type": "spell", "slot": slot, "word": word,
+            "cooldown_ms": effective_cooldown_ms(word),
+            "cooldown_until_ms": int(time.time() * 1000 + effective_cooldown_ms(word)),
+        })
         return
 
     if word == "fulmine":
         target = find_lightning_target(slot)
-        await send_all({"type": "spell", "slot": slot, "word": word, "target": target})
+        await send_all({
+            "type": "spell", "slot": slot, "word": word, "target": target,
+            "cooldown_ms": effective_cooldown_ms(word),
+            "cooldown_until_ms": int(time.time() * 1000 + effective_cooldown_ms(word)),
+        })
         if target is not None:
             await apply_damage(target, LIGHTNING_DAMAGE)
         return
@@ -233,6 +243,8 @@ async def try_spell(slot, word):
             "slot": slot,
             "word": word,
             "duration": FIRE_DURATION_S,
+            "cooldown_ms": effective_cooldown_ms(word),
+            "cooldown_until_ms": int(time.time() * 1000 + effective_cooldown_ms(word)),
         })
         asyncio.create_task(run_fire_effect(slot))
         return
