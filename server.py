@@ -19,6 +19,7 @@ from src.server.config import (
     SERVER_PORT,
     MODEL_PATH,
 )
+from src.server.network import broadcast_dirty_positions
 from src.server.world import load_or_generate_world_map as load_world_map
 from src.server.ws_handler import handle_client
 
@@ -51,9 +52,14 @@ except Exception:
 
 async def main():
     """Start the WebSocket server and keep it alive for connected clients."""
-    async with websockets.serve(lambda ws: handle_client(ws, model, WORLD_MAP), SERVER_ADDRESS, SERVER_PORT):
-        print(f"server vocale in ascolto su wss://{SERVER_ADDRESS}:{SERVER_PORT}")
-        await asyncio.Future()
+    position_task = asyncio.create_task(broadcast_dirty_positions())
+    try:
+        async with websockets.serve(lambda ws: handle_client(ws, model, WORLD_MAP), SERVER_ADDRESS, SERVER_PORT):
+            print(f"server vocale in ascolto su wss://{SERVER_ADDRESS}:{SERVER_PORT}")
+            await asyncio.Future()
+    finally:
+        position_task.cancel()
+        await asyncio.gather(position_task, return_exceptions=True)
 
 
 if __name__ == "__main__":

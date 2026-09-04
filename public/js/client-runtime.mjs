@@ -19,7 +19,12 @@ export function bootClient() {
   const GROUND_GRACE_PERIOD = 0.12;
   const PLAYER_RADIUS = 0.35;
   const POSITION_SEND_INTERVAL_MS = 100;
+  const POSITION_HEARTBEAT_INTERVAL_MS = 1000;
+  const POSITION_CHANGE_THRESHOLD = 0.02;
+  const ROTATION_CHANGE_THRESHOLD = 0.01;
   const REMOTE_LERP_FACTOR = 0.18;
+  const VOICE_VOLUME_UPDATE_INTERVAL_MS = 100;
+  const COOLDOWN_UPDATE_INTERVAL_MS = 50;
 
   const FIRE_DURATION_S = 5;
   const SPELL_COLORS = { fulmine: 0xa3d5ff, scudo: 0x4fd1c5, fuoco: 0xff6b35 };
@@ -491,6 +496,14 @@ export function bootClient() {
     }
   }
 
+  let lastVoiceVolumeUpdateAt = 0;
+
+  function updateVoiceVolumesIfDue(now) {
+    if (now - lastVoiceVolumeUpdateAt < VOICE_VOLUME_UPDATE_INTERVAL_MS) return;
+    lastVoiceVolumeUpdateAt = now;
+    updateVoiceVolumes();
+  }
+
   function eyeHeightToGroundOffset(y) {
     return y - EYE_HEIGHT;
   }
@@ -729,7 +742,12 @@ export function bootClient() {
 
   function castShield(anchor) {
     // Attach a temporary expanding shield mesh to the player's anchor.
-    if (anchor.userData.shieldMesh) anchor.remove(anchor.userData.shieldMesh);
+    if (anchor.userData.shieldMesh) {
+      const previousShield = anchor.userData.shieldMesh;
+      anchor.remove(previousShield);
+      previousShield.geometry.dispose();
+      previousShield.material.dispose();
+    }
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.9, 32, 32),
       new THREE.MeshBasicMaterial({ color: SPELL_COLORS.scudo, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
@@ -765,6 +783,14 @@ export function bootClient() {
       const fraction = Math.min((now - lastLocalCast[name]) / SPELLS_COOLDOWNS[name], 1);
       cooldownBars[name].style.transform = `scaleX(${fraction})`;
     }
+  }
+
+  let lastCooldownUpdateAt = 0;
+
+  function updateCooldownBarsIfDue(now) {
+    if (now - lastCooldownUpdateAt < COOLDOWN_UPDATE_INTERVAL_MS) return;
+    lastCooldownUpdateAt = now;
+    updateCooldownBars();
   }
 
   // Pointer lock controls connect mouse look and keyboard movement to the camera.
@@ -1239,6 +1265,7 @@ export function bootClient() {
   let microphoneReady = Promise.resolve();
   let microphoneEnabled = true;
   let lastPositionSentAt = 0;
+  let lastSentPosition = null;
 
   function setMicrophoneEnabled(enabled) {
     microphoneEnabled = enabled;
@@ -1260,6 +1287,8 @@ export function bootClient() {
     socket.binaryType = 'arraybuffer';
 
     socket.onopen = () => {
+      lastSentPosition = null;
+      lastPositionSentAt = 0;
       hud.textContent = 'Connesso al server...';
     };
 
@@ -1415,19 +1444,30 @@ export function bootClient() {
   }
 
   function sendPositionIfDue() {
-    // Throttle position broadcasts to reduce network traffic.
+    // Send changed positions promptly, but keep a low-rate heartbeat while stationary.
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const now = performance.now();
     if (now - lastPositionSentAt < POSITION_SEND_INTERVAL_MS) return;
-    lastPositionSentAt = now;
-    socket.send(JSON.stringify({
+    const position = {
       type: 'position',
       x: camera.position.x,
       y: camera.position.y,
       z: camera.position.z,
       yaw: camera.rotation.y,
       pitch: camera.rotation.x,
-    }));
+    };
+    const changed = !lastSentPosition
+      || Math.abs(position.x - lastSentPosition.x) >= POSITION_CHANGE_THRESHOLD
+      || Math.abs(position.y - lastSentPosition.y) >= POSITION_CHANGE_THRESHOLD
+      || Math.abs(position.z - lastSentPosition.z) >= POSITION_CHANGE_THRESHOLD
+      || Math.abs(shortestAngleDelta(lastSentPosition.yaw, position.yaw)) >= ROTATION_CHANGE_THRESHOLD
+      || Math.abs(shortestAngleDelta(lastSentPosition.pitch, position.pitch)) >= ROTATION_CHANGE_THRESHOLD;
+    const heartbeatDue = !lastSentPosition
+      || now - lastPositionSentAt >= POSITION_HEARTBEAT_INTERVAL_MS;
+    if (!changed && !heartbeatDue) return;
+    lastPositionSentAt = now;
+    lastSentPosition = position;
+    socket.send(JSON.stringify(position));
   }
 
   overlay.addEventListener('click', async () => {
@@ -1468,11 +1508,16 @@ export function bootClient() {
       if (shield) updateShield(shield);
     }
     updateShield(localAnchor.userData.shieldMesh);
-    updateVoiceVolumes();
+    updateVoiceVolumesIfDue(now);
 
     activeParticles = activeParticles.filter((p) => {
       const age = now - p.born;
-      if (age > p.lifetime) { scene.remove(p.points); return false; }
+      if (age > p.lifetime) {
+        scene.remove(p.points);
+        p.points.geometry.dispose();
+        p.points.material.dispose();
+        return false;
+      }
       const positions = p.points.geometry.attributes.position;
       for (let i = 0; i < p.velocities.length; i++) {
         positions.array[i * 3 + 0] += p.velocities[i].x * 0.016;
@@ -1485,7 +1530,7 @@ export function bootClient() {
       return true;
     });
 
-    updateCooldownBars();
+    updateCooldownBarsIfDue(now);
     renderer.render(scene, camera);
   }
 
@@ -1498,6 +1543,8 @@ export function bootClient() {
     if (age > 2400) {
       const parent = shield.parent;
       parent.remove(shield);
+      shield.geometry.dispose();
+      shield.material.dispose();
       parent.userData.shieldMesh = null;
     }
   }
