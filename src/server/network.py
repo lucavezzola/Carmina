@@ -16,3 +16,14 @@ async def send_all(message, exclude_slot=None):
     if not targets:
         return
     await asyncio.gather(*(ws.send(text) for ws in targets), return_exceptions=True)
+
+
+async def send_to(slot, message):
+    """Send a JSON message to one connected player."""
+    player = players.get(slot)
+    if player is None:
+        return
+    try:
+        await player["websocket"].send(json.dumps(message))
+    except Exception:
+        return

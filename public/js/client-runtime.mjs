@@ -1,4 +1,4 @@
-import { WSS_URL } from './client-config.mjs';
+import { RTC_ICE_SERVERS, WSS_URL } from './client-config.mjs';
 
 export function bootClient() {
   // Prevent duplicate listeners and animation loops if the module is loaded twice.
@@ -29,6 +29,7 @@ export function bootClient() {
   const FIRE_DEPTH = 5;
   const FIRE_RADIUS_NEAR = 0.5;
   const FIRE_RADIUS_FAR = 2.5;
+  const VOICE_CHAT_RADIUS = 15;
 
   // Cache HUD elements used by damage and health updates.
   const healthFillEl = document.getElementById('healthbar-fill');
@@ -319,6 +320,9 @@ export function bootClient() {
   scene.add(localAnchor);
 
   const remotePlayers = {};
+  const peerConnections = {};
+  const pendingIceCandidates = {};
+  const remoteAudio = {};
   let mySlot = null;
   let myHp = MAX_HP;
 
@@ -338,6 +342,7 @@ export function bootClient() {
   }
 
   function removeRemotePlayer(slot) {
+    closePeerConnection(slot);
     const player = remotePlayers[slot];
     if (!player) return;
     scene.remove(player.group);
@@ -353,6 +358,137 @@ export function bootClient() {
     player.targetGroundY = groundY;
     player.targetYaw = yaw;
     player.targetPitch = pitch;
+  }
+
+  function sendRtcSignal(target, signal) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: 'rtc_signal', target, signal }));
+  }
+
+  function closePeerConnection(slot) {
+    const connection = peerConnections[slot];
+    if (connection) {
+      connection.onicecandidate = null;
+      connection.ontrack = null;
+      connection.onconnectionstatechange = null;
+      connection.close();
+      delete peerConnections[slot];
+    }
+    delete pendingIceCandidates[slot];
+
+    const audio = remoteAudio[slot];
+    if (audio) {
+      audio.srcObject = null;
+      audio.remove();
+      delete remoteAudio[slot];
+    }
+  }
+
+  async function createPeerConnection(slot, shouldOffer) {
+    if (peerConnections[slot]) return peerConnections[slot];
+
+    const connection = new RTCPeerConnection({ iceServers: RTC_ICE_SERVERS });
+    peerConnections[slot] = connection;
+
+    if (micStream) {
+      for (const track of micStream.getAudioTracks()) {
+        connection.addTrack(track, micStream);
+      }
+    }
+
+    connection.onicecandidate = (event) => {
+      if (event.candidate) sendRtcSignal(slot, {
+        type: 'candidate',
+        candidate: event.candidate.toJSON(),
+      });
+    };
+
+    connection.ontrack = (event) => {
+      let audio = remoteAudio[slot];
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.setAttribute('aria-hidden', 'true');
+        audio.style.display = 'none';
+        document.body.appendChild(audio);
+        remoteAudio[slot] = audio;
+      }
+      audio.srcObject = event.streams[0];
+    };
+
+    connection.onconnectionstatechange = () => {
+      if (['failed', 'closed'].includes(connection.connectionState)) {
+        closePeerConnection(slot);
+      }
+    };
+
+    if (shouldOffer) {
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
+      sendRtcSignal(slot, {
+        type: 'offer',
+        sdp: connection.localDescription.sdp,
+      });
+    }
+
+    return connection;
+  }
+
+  async function handleRtcSignal(message) {
+    const slot = message.from;
+    const signal = message.signal;
+    if (slot === undefined || !signal) return;
+
+    await microphoneReady;
+
+    if (signal.type === 'offer') {
+      const connection = await createPeerConnection(slot, false);
+      await connection.setRemoteDescription({ type: 'offer', sdp: signal.sdp });
+      for (const candidate of pendingIceCandidates[slot] || []) {
+        await connection.addIceCandidate(candidate);
+      }
+      delete pendingIceCandidates[slot];
+      const answer = await connection.createAnswer();
+      await connection.setLocalDescription(answer);
+      sendRtcSignal(slot, {
+        type: 'answer',
+        sdp: connection.localDescription.sdp,
+      });
+    } else if (signal.type === 'answer') {
+      const connection = peerConnections[slot];
+      if (connection) {
+        await connection.setRemoteDescription({ type: 'answer', sdp: signal.sdp });
+        for (const candidate of pendingIceCandidates[slot] || []) {
+          await connection.addIceCandidate(candidate);
+        }
+        delete pendingIceCandidates[slot];
+      }
+    } else if (signal.type === 'candidate') {
+      const connection = await createPeerConnection(slot, false);
+      if (connection.remoteDescription) {
+        await connection.addIceCandidate(signal.candidate);
+      } else {
+        if (!pendingIceCandidates[slot]) pendingIceCandidates[slot] = [];
+        pendingIceCandidates[slot].push(signal.candidate);
+      }
+    }
+  }
+
+  function updateVoiceVolumes() {
+    for (const slot in remoteAudio) {
+      const player = remotePlayers[slot];
+      if (!player) {
+        remoteAudio[slot].volume = 0;
+        continue;
+      }
+      const distance = Math.hypot(
+        camera.position.x - player.group.position.x,
+        camera.position.z - player.group.position.z
+      );
+      const proximity = Math.max(0, 1 - distance / VOICE_CHAT_RADIUS);
+      remoteAudio[slot].volume = proximity * proximity;
+    }
   }
 
   function eyeHeightToGroundOffset(y) {
@@ -659,6 +795,10 @@ export function bootClient() {
   let horizontalMovementStartZ = 0;
 
   document.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyM' && !e.repeat) {
+      setMicrophoneEnabled(!microphoneEnabled);
+      return;
+    }
     setKey(e.code, true);
     if (e.code === 'Space' && (isGrounded || groundedGraceTime > 0) && controls.isLocked) {
       verticalVelocity = JUMP_SPEED;
@@ -1096,7 +1236,23 @@ export function bootClient() {
   }
 
   let socket, audioContext, workletNode, micStream;
+  let microphoneReady = Promise.resolve();
+  let microphoneEnabled = true;
   let lastPositionSentAt = 0;
+
+  function setMicrophoneEnabled(enabled) {
+    microphoneEnabled = enabled;
+    if (micStream) {
+      for (const track of micStream.getAudioTracks()) {
+        track.enabled = microphoneEnabled;
+      }
+    }
+    if (mySlot !== null) {
+      hud.textContent = microphoneEnabled
+        ? `Slot ${mySlot + 1} - microfono attivo`
+        : `Slot ${mySlot + 1} - microfono disattivato`;
+    }
+  }
 
   async function connectToServer() {
     // Open the WebSocket and route world, player, spell, and health messages.
@@ -1122,7 +1278,11 @@ export function bootClient() {
           if (p.hp !== undefined) remotePlayers[p.slot].hp = p.hp;
         }
         hud.textContent = `Slot ${mySlot + 1} - richiedo il microfono...`;
-        await startMicrophone();
+        microphoneReady = startMicrophone();
+        await microphoneReady;
+        for (const p of message.players) {
+          if (mySlot < p.slot) await createPeerConnection(p.slot, true);
+        }
         hud.textContent = `Slot ${mySlot + 1} - in ascolto`;
         return;
       }
@@ -1130,11 +1290,17 @@ export function bootClient() {
       if (message.type === 'player_connected') {
         addRemotePlayer(message.slot, message.x, message.z, eyeHeightToGroundOffset(message.y), message.yaw, message.pitch || 0);
         attachBodyMaterial(message.slot);
+        if (mySlot < message.slot) await createPeerConnection(message.slot, true);
         return;
       }
 
       if (message.type === 'player_disconnected') {
         removeRemotePlayer(message.slot);
+        return;
+      }
+
+      if (message.type === 'rtc_signal') {
+        await handleRtcSignal(message);
         return;
       }
 
@@ -1214,6 +1380,7 @@ export function bootClient() {
     };
 
     socket.onclose = () => {
+      for (const slot in peerConnections) closePeerConnection(slot);
       hud.textContent = 'Disconnesso.';
       socket = null;
     };
@@ -1226,6 +1393,7 @@ export function bootClient() {
   async function startMicrophone() {
     // Feed microphone PCM data into the audio worklet and then to the game server.
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    setMicrophoneEnabled(microphoneEnabled);
     audioContext = new AudioContext();
     await audioContext.audioWorklet.addModule('./pcm-processor.js');
     const source = audioContext.createMediaStreamSource(micStream);
@@ -1233,9 +1401,17 @@ export function bootClient() {
       processorOptions: { targetSampleRate: 16000, inputSampleRate: audioContext.sampleRate }
     });
     workletNode.port.onmessage = (event) => {
-      if (socket && socket.readyState === WebSocket.OPEN) socket.send(event.data);
+      if (microphoneEnabled && socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(event.data);
+      }
     };
     source.connect(workletNode);
+
+    for (const slot in peerConnections) {
+      for (const track of micStream.getAudioTracks()) {
+        peerConnections[slot].addTrack(track, micStream);
+      }
+    }
   }
 
   function sendPositionIfDue() {
@@ -1292,6 +1468,7 @@ export function bootClient() {
       if (shield) updateShield(shield);
     }
     updateShield(localAnchor.userData.shieldMesh);
+    updateVoiceVolumes();
 
     activeParticles = activeParticles.filter((p) => {
       const age = now - p.born;

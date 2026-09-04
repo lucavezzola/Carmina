@@ -23,7 +23,17 @@
     box-shadow: 0 0 4px rgba(0,0,0,0.6); pointer-events: none; display: none;
   }
 
-  #hud { position: fixed; top: 20px; left: 20px; font-size: 0.8rem; color: #9aa3c0; }
+  #hud {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    padding: 5px;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    color: #c1ccf0;
+    background-color: rgba(0, 16, 96, 0.7);
+  }
+
 
   #healthbar-container {
     position: fixed; top: 50%; left: 24px; transform: translateY(-50%);
@@ -79,7 +89,7 @@
 <div id="overlay">
   <div>
     <h2>Clicca per entrare</h2>
-    <p>WASD per muoverti, mouse per guardarti intorno, ESC per uscire<br>Pronuncia un incantesimo per lanciarlo</p>
+    <p>WASD per muoverti, mouse per guardarti intorno, M per mutarti, ESC per uscire<br>Pronuncia un incantesimo per lanciarlo!</p>
   </div>
 </div>
 

@@ -10,7 +10,7 @@ from vosk import KaldiRecognizer
 
 from .combat import try_spell
 from .config import MAX_HP, SAMPLE_RATE, SPELLS_LIST, players
-from .network import send_all
+from .network import send_all, send_to
 from .players import spawn_position
 
 
@@ -109,7 +109,17 @@ async def handle_client(websocket, model, world_map):
                 except json.JSONDecodeError:
                     continue
 
-                if data.get("type") == "position":
+                if data.get("type") == "rtc_signal":
+                    target = data.get("target")
+                    signal = data.get("signal")
+                    if isinstance(target, int) and isinstance(signal, dict) and target in players:
+                        await send_to(target, {
+                            "type": "rtc_signal",
+                            "from": slot,
+                            "signal": signal,
+                        })
+
+                elif data.get("type") == "position":
                     player_state = players[slot]
                     player_state["x"] = data.get("x", player_state["x"])
                     player_state["y"] = data.get("y", player_state["y"])
