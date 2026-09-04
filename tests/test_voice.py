@@ -2,7 +2,7 @@ from src.server.voice import find_spell_matches, find_spells
 
 
 def test_find_spells_is_case_insensitive_and_normalized():
-    assert find_spells("FUOCO, poi scudo e Fulmine") == ["fuoco", "scudo", "fulmine"]
+    assert find_spells("FUOCO, poi scudo, Fulmine e PORTA") == ["fuoco", "scudo", "fulmine", "porta"]
 
 
 def test_find_spell_matches_preserves_match_positions():

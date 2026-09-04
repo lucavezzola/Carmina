@@ -10,12 +10,12 @@ import math
 SERVER_ADDRESS = "0.0.0.0"
 SERVER_PORT = 8765
 
-SPELLS_LIST = ["fulmine", "scudo", "fuoco"]
+SPELLS_LIST = ["fulmine", "scudo", "fuoco", "porta"]
 MODEL_PATH = "model"
 SAMPLE_RATE = 16000
 
 MAX_PLAYERS = 5
-SPELLS_COOLDOWNS = {"fulmine": 18000, "scudo": 3000, "fuoco": 7000}
+SPELLS_COOLDOWNS = {"fulmine": 18000, "scudo": 3000, "fuoco": 7000, "porta": 10000}
 SPAWN_RADIUS = 3.0
 EYE_HEIGHT = 1.7
 players = {}

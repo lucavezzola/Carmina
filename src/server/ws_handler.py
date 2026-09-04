@@ -46,6 +46,7 @@ async def handle_client(websocket, model, world_map):
         "pitch": 0.0,
         "hp": MAX_HP,
         "shielded_until": 0.0,
+        "teleport_target": None,
     }
 
     existing_players = [

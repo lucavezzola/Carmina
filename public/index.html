@@ -74,6 +74,10 @@
   .fulmine .name { color: #a3d5ff; } .fulmine .fill { background: #a3d5ff; box-shadow: 0 0 8px #a3d5ff; }
   .scudo .name { color: #4fd1c5; } .scudo .fill { background: #4fd1c5; box-shadow: 0 0 8px #4fd1c5; }
   .fuoco .name { color: #ff6b35; } .fuoco .fill { background: #ff6b35; box-shadow: 0 0 8px #ff6b35; }
+  .porta .name { color: #c77dff; transition: text-shadow 0.2s ease, color 0.2s ease; }
+  .porta.armed .name { color: #f2c2ff; text-shadow: 0 0 6px #c77dff, 0 0 16px #9b5de5; }
+  .porta .fill { background: #9b5de5; box-shadow: 0 0 8px #9b5de5; }
+  .porta .countdown { min-height: 0.9em; margin-top: 4px; color: #d9b3ff; font-size: 0.66rem; }
 </style>
 </head>
 <body>
@@ -97,6 +101,7 @@
   <div class="spell fulmine"><div class="name">Fulmine</div><div class="bar"><div class="fill" data-spell="fulmine"></div></div></div>
   <div class="spell scudo"><div class="name">Scudo</div><div class="bar"><div class="fill" data-spell="scudo"></div></div></div>
   <div class="spell fuoco"><div class="name">Fuoco</div><div class="bar"><div class="fill" data-spell="fuoco"></div></div></div>
+  <div class="spell porta"><div class="name">Porta</div><div class="bar"><div class="fill" data-spell="porta"></div></div><div class="countdown" data-porta-status>Pronto</div></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>

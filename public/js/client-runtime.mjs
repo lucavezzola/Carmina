@@ -32,8 +32,8 @@ export function bootClient() {
   const COOLDOWN_UPDATE_INTERVAL_MS = 50;
 
   const FIRE_DURATION_S = 5;
-  const SPELL_COLORS = { fulmine: 0xa3d5ff, scudo: 0x4fd1c5, fuoco: 0xff6b35 };
-  const SPELLS_COOLDOWNS = { fulmine: 18000, scudo: 3000, fuoco: 7000 + FIRE_DURATION_S * 1000 };
+  const SPELL_COLORS = { fulmine: 0xa3d5ff, scudo: 0x4fd1c5, fuoco: 0xff6b35, porta: 0x9b5de5 };
+  const SPELLS_COOLDOWNS = { fulmine: 18000, scudo: 3000, fuoco: 7000 + FIRE_DURATION_S * 1000, porta: 10000 };
   const MAX_HP = 100;
   const LIGHTNING_RANGE = 20;
   const FIRE_DEPTH = 5;
@@ -742,6 +742,8 @@ export function bootClient() {
 
   let activeParticles = [];
   let activeFires = [];
+  let localTeleportMarker = null;
+  let teleportArmed = false;
   const worldPosition = new THREE.Vector3();
 
   function spawnParticles(color, count, origin) {
@@ -760,6 +762,47 @@ export function bootClient() {
     const points = new THREE.Points(geometry, material);
     scene.add(points);
     activeParticles.push({ points, velocities, born: performance.now(), lifetime: 900 });
+  }
+
+  function spawnTeleportPoof(origin) {
+    spawnParticles(SPELL_COLORS.porta, 46, origin);
+    spawnParticles(0xd65db1, 18, origin);
+    spawnParticles(0xffd166, 10, origin);
+  }
+
+  function clearTeleportMarker() {
+    if (!localTeleportMarker) return;
+    scene.remove(localTeleportMarker);
+    localTeleportMarker.userData.cloud.geometry.dispose();
+    localTeleportMarker.userData.cloud.material.dispose();
+    localTeleportMarker = null;
+  }
+
+  function showTeleportMarker(position) {
+    clearTeleportMarker();
+    const positions = new Float32Array(42 * 3);
+    for (let index = 0; index < 42; index++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.sqrt(Math.random()) * 0.75;
+      positions[index * 3] = Math.cos(angle) * radius;
+      positions[index * 3 + 1] = 0.35 + Math.random() * 1.1;
+      positions[index * 3 + 2] = Math.sin(angle) * radius;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.PointsMaterial({
+      color: 0xf08cff, size: 0.13, transparent: true, opacity: 0.78,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    localTeleportMarker = new THREE.Group();
+    const cloud = new THREE.Points(geometry, material);
+    const light = new THREE.PointLight(0xc77dff, 2.4, 8, 2);
+    light.position.y = 0.7;
+    localTeleportMarker.userData.cloud = cloud;
+    localTeleportMarker.userData.baseY = position.y;
+    localTeleportMarker.add(cloud, light);
+    localTeleportMarker.position.copy(position);
+    scene.add(localTeleportMarker);
   }
 
   function getBodyMaterial(anchor) {
@@ -991,7 +1034,7 @@ export function bootClient() {
   }
 
   // Cooldowns are client-side presentation; the server remains authoritative for spell rules.
-  const lastLocalCast = { fulmine: 0, scudo: 0, fuoco: 0 };
+  const lastLocalCast = { fulmine: 0, scudo: 0, fuoco: 0, porta: 0 };
   const cooldownBars = {};
   document.querySelectorAll('.fill').forEach((el) => {
     cooldownBars[el.dataset.spell] = el;
@@ -1000,8 +1043,20 @@ export function bootClient() {
   function updateCooldownBars() {
     const now = performance.now();
     for (const name in cooldownBars) {
+      if (!cooldownBars[name]) continue;
       const fraction = Math.min((now - lastLocalCast[name]) / SPELLS_COOLDOWNS[name], 1);
       cooldownBars[name].style.transform = `scaleX(${fraction})`;
+    }
+    const portaStatus = document.querySelector('[data-porta-status]');
+    const portaCard = document.querySelector('.spell.porta');
+    if (portaStatus && portaCard) {
+      portaCard.classList.toggle('armed', teleportArmed);
+      if (teleportArmed) {
+        portaStatus.textContent = 'PORTA ARMATA';
+      } else {
+        const remaining = Math.max(0, SPELLS_COOLDOWNS.porta - (now - lastLocalCast.porta));
+        portaStatus.textContent = remaining > 0 ? `${Math.ceil(remaining / 1000)}s` : 'Pronto';
+      }
     }
   }
 
@@ -1677,8 +1732,44 @@ export function bootClient() {
 
       if (message.type === 'spell') {
         const anchor = getEffectAnchor(message.slot);
-        if (message.slot === mySlot) lastLocalCast[message.word] = performance.now();
         if (!anchor) return;
+
+        if (message.word === 'porta') {
+          if (message.phase === 'set') {
+            if (message.slot === mySlot) {
+              teleportArmed = true;
+              showTeleportMarker(new THREE.Vector3(message.x, message.y, message.z));
+              updateCooldownBars();
+            }
+            return;
+          }
+          if (message.phase === 'teleport') {
+            if (message.slot === mySlot) {
+              lastLocalCast.porta = performance.now();
+              teleportArmed = false;
+              clearTeleportMarker();
+            }
+            const departure = message.slot === mySlot
+              ? camera.position.clone()
+              : anchor.getWorldPosition(new THREE.Vector3());
+            spawnTeleportPoof(departure);
+            const destination = new THREE.Vector3(message.x, message.y, message.z);
+            if (message.slot === mySlot) {
+              camera.position.copy(destination);
+            } else {
+              anchor.position.set(message.x, eyeHeightToGroundOffset(message.y), message.z);
+              const player = remotePlayers[message.slot];
+              player.targetX = message.x;
+              player.targetY = eyeHeightToGroundOffset(message.y);
+              player.targetZ = message.z;
+              player.targetGroundY = eyeHeightToGroundOffset(message.y);
+            }
+            spawnTeleportPoof(destination);
+          }
+          return;
+        }
+
+        if (message.slot === mySlot) lastLocalCast[message.word] = performance.now();
 
         const { yaw, pitch } = getCasterOrientation(message.slot);
         const forward = forwardVector(yaw, pitch);
@@ -1849,6 +1940,11 @@ export function bootClient() {
     updateFaceAnimations(now);
     updateVoiceVolumesIfDue(now);
     updateFireEffects(now);
+    if (localTeleportMarker) {
+      localTeleportMarker.rotation.y += delta * 0.7;
+      localTeleportMarker.position.y = localTeleportMarker.userData.baseY + Math.sin(now * 0.003) * 0.08;
+      localTeleportMarker.userData.cloud.material.opacity = 0.62 + Math.sin(now * 0.004) * 0.16;
+    }
 
     activeParticles = activeParticles.filter((p) => {
       const age = now - p.born;

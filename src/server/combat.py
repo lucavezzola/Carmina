@@ -114,6 +114,7 @@ async def apply_damage(slot, amount):
     await send_all({"type": "health_update", "slot": slot, "hp": player_state["hp"]})
 
     if player_state["hp"] <= 0:
+        player_state["teleport_target"] = None
         await send_all({"type": "player_down", "slot": slot})
         asyncio.create_task(respawn_after_delay(slot))
 
@@ -128,6 +129,7 @@ async def respawn_after_delay(slot):
     x, y, z = player_state.get("spawn", (0, 0, 0))
     player_state["x"], player_state["y"], player_state["z"] = x, y, z
     player_state["hp"] = MAX_HP
+    player_state["teleport_target"] = None
     await send_all({
         "type": "player_respawn",
         "slot": slot,
@@ -171,6 +173,40 @@ async def try_spell(slot, word):
     """Validate cooldowns and execute the requested authoritative spell action."""
     player_state = players.get(slot)
     if player_state is None:
+        return
+
+    if word == "porta":
+        now = time.monotonic() * 1000
+        last_cast = player_state["last_cast"].get(word, 0.0)
+        teleport_target = player_state.get("teleport_target")
+        if teleport_target is None:
+            if now - last_cast < effective_cooldown_ms(word):
+                return
+            player_state["teleport_target"] = {
+                "x": player_state["x"],
+                "y": player_state["y"],
+                "z": player_state["z"],
+            }
+            await send_all({
+                "type": "spell", "slot": slot, "word": word, "phase": "set",
+                "x": player_state["x"], "y": player_state["y"], "z": player_state["z"],
+            })
+            return
+
+        player_state["last_cast"][word] = now
+        player_state["x"] = teleport_target["x"]
+        player_state["y"] = teleport_target["y"]
+        player_state["z"] = teleport_target["z"]
+        player_state["teleport_target"] = None
+        await send_all({
+            "type": "spell", "slot": slot, "word": word, "phase": "teleport",
+            "x": player_state["x"], "y": player_state["y"], "z": player_state["z"],
+        })
+        await send_all({
+            "type": "player_position", "slot": slot,
+            "x": player_state["x"], "y": player_state["y"], "z": player_state["z"],
+            "yaw": player_state["yaw"], "pitch": player_state["pitch"],
+        })
         return
 
     now = time.monotonic() * 1000
