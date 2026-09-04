@@ -156,8 +156,8 @@ export function bootClient() {
   function registerObstacle(obstacle) {
     obstacle.broadphaseRadius = obstacle.broadphaseRadius
       ?? (obstacle.type === 'box'
-        ? Math.hypot(obstacle.halfWidth, obstacle.halfDepth)
-        : obstacle.radius || 0);
+        ? Math.hypot(obstacle.halfWidth, obstacle.halfHeight, obstacle.halfDepth)
+        : Math.hypot(obstacle.radius || 0, obstacle.halfHeight || 0));
     obstacles.push(obstacle);
 
     const minCellX = Math.floor((obstacle.x - obstacle.broadphaseRadius) / OBSTACLE_CELL_SIZE);
@@ -268,37 +268,39 @@ export function bootClient() {
   }
 
   function createRotatedBox(x, y, z, width, height, depth, rotation, color) {
-    // Ramps use the same box collider as buildings, rotated in local space.
+    // Ramps use the same box collider as buildings; y is the object base height.
     const { quaternion, invQuaternion } = makeRotationQuaternions(rotation);
+    const boxCenterY = y + height / 2;
 
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(width, height, depth),
       new THREE.MeshStandardMaterial({ color })
     );
-    mesh.position.set(x, y, z);
+    mesh.position.set(x, boxCenterY, z);
     mesh.quaternion.copy(quaternion);
     scene.add(mesh);
 
     registerObstacle({
-      type: 'box', x, y, z, quaternion, invQuaternion,
+      type: 'box', x, y: boxCenterY, z, quaternion, invQuaternion,
       halfWidth: width / 2, halfHeight: height / 2, halfDepth: depth / 2,
     });
   }
 
   function createColumn(x, y, z, radius, height, rotation, color) {
-    // Columns use a cylinder mesh and a matching cylinder collision descriptor.
+    // Columns use a cylinder mesh and a matching collider; y is the object base height.
     const { quaternion, invQuaternion } = makeRotationQuaternions(rotation);
+    const centerY = y + height / 2;
 
     const mesh = new THREE.Mesh(
       new THREE.CylinderGeometry(radius, radius, height, 16),
       new THREE.MeshStandardMaterial({ color })
     );
-    mesh.position.set(x, y, z);
+    mesh.position.set(x, centerY, z);
     mesh.quaternion.copy(quaternion);
     scene.add(mesh);
 
     registerObstacle({
-      type: 'cylinder', x, y, z, quaternion, invQuaternion,
+      type: 'cylinder', x, y: centerY, z, quaternion, invQuaternion,
       radius, halfHeight: height / 2,
     });
   }
@@ -1017,15 +1019,62 @@ export function bootClient() {
     return new THREE.Vector3(localPoint.x * scale, clampedY, localPoint.z * scale);
   }
 
-  function applySpherePush(worldPoint, closestWorld) {
+  function cylinderContactLocal(o, localPoint) {
+    const radial = Math.hypot(localPoint.x, localPoint.z);
+    const insideRadial = radial <= o.radius;
+    const insideHeight = Math.abs(localPoint.y) <= o.halfHeight;
+
+    if (insideRadial && insideHeight) {
+      const radialDistance = o.radius - radial;
+      const topDistance = o.halfHeight - localPoint.y;
+      const bottomDistance = o.halfHeight + localPoint.y;
+      if (radialDistance <= topDistance && radialDistance <= bottomDistance) {
+        const normal = radial > 0.0001
+          ? new THREE.Vector3(localPoint.x / radial, 0, localPoint.z / radial)
+          : new THREE.Vector3(1, 0, 0);
+        return {
+          point: new THREE.Vector3(normal.x * o.radius, localPoint.y, normal.z * o.radius),
+          normal,
+          penetration: radialDistance,
+        };
+      }
+
+      const top = topDistance <= bottomDistance;
+      return {
+        point: new THREE.Vector3(localPoint.x, top ? o.halfHeight : -o.halfHeight, localPoint.z),
+        normal: new THREE.Vector3(0, top ? 1 : -1, 0),
+        penetration: top ? topDistance : bottomDistance,
+      };
+    }
+
+    const point = closestPointOnCylinderLocal(o, localPoint);
+    const offset = localPoint.clone().sub(point);
+    const distance = offset.length();
+    const normal = distance > 0.0001
+      ? offset.multiplyScalar(1 / distance)
+      : new THREE.Vector3(1, 0, 0);
+    return { point, normal, penetration: 0 };
+  }
+
+  function applySpherePush(worldPoint, closestWorld, forceEscape = false) {
     // Push the body horizontally out of a nearby curved or corner surface.
     const offset = worldPoint.clone().sub(closestWorld);
     const distance = offset.length();
-    if (distance >= PLAYER_RADIUS || distance <= 0.0001) return;
+    if ((!forceEscape && distance >= PLAYER_RADIUS) || distance <= 0.0001) return;
+
+    // A mostly upward contact is support for the body, not a side collision.
+    if (offset.y / distance > 0.7) return;
 
     const horizontal = new THREE.Vector2(offset.x, offset.z);
     const horizontalDistance = horizontal.length();
     if (horizontalDistance <= 0.0001) return;
+
+    if (forceEscape) {
+      const escapeDirection = new THREE.Vector2(-offset.x, -offset.z).normalize();
+      camera.position.x = closestWorld.x + escapeDirection.x * PLAYER_RADIUS;
+      camera.position.z = closestWorld.z + escapeDirection.y * PLAYER_RADIUS;
+      return;
+    }
 
     const pushDistance = Math.sqrt(Math.max(0, PLAYER_RADIUS * PLAYER_RADIUS - offset.y * offset.y));
     const factor = pushDistance / horizontalDistance;
@@ -1054,52 +1103,50 @@ export function bootClient() {
   }
 
   function resolveBoxCollision(o, feetHeight) {
-    // Keep the body inside valid vertical space without ejecting it from roofs or undersides.
-    const surfaceY = rayDownHeightOnBox(o, camera.position.x, camera.position.z);
-    if (surfaceY !== null && feetHeight >= surfaceY - 0.05) return;
-    if (o.topY !== undefined && feetHeight >= o.topY - 0.05) return;
-
-    const undersideY = rayUpHeightOnBox(o, camera.position.x, camera.position.z);
-    const bodyTop = feetHeight + BODY_HEIGHT + BODY_RADIUS;
-    if (undersideY !== null && feetHeight < undersideY && bodyTop >= undersideY - 0.05) return;
-
-    if (verticalVelocity <= 0 && surfaceY !== null
-      && feetHeight + BODY_HEIGHT + BODY_RADIUS >= surfaceY) return;
-
+    // Use the actual rotated box surface so steep ramps and side contacts push correctly.
     const bodyCenter = camera.position.clone();
     bodyCenter.y -= EYE_HEIGHT - BODY_HEIGHT;
     const localPoint = toLocalPoint(o, bodyCenter);
-    applyBoxHorizontalPush(o, localPoint);
+    const closestLocal = closestPointOnBoxLocal(o, localPoint);
+    const inside = closestLocal.distanceToSquared(localPoint) <= 0.000001;
+    if (inside) {
+      const distances = [
+        { axis: 'x', value: o.halfWidth - localPoint.x, direction: 1 },
+        { axis: 'x', value: o.halfWidth + localPoint.x, direction: -1 },
+        { axis: 'z', value: o.halfDepth - localPoint.z, direction: 1 },
+        { axis: 'z', value: o.halfDepth + localPoint.z, direction: -1 },
+        { axis: 'y', value: o.halfHeight - localPoint.y, direction: 1 },
+        { axis: 'y', value: o.halfHeight + localPoint.y, direction: -1 },
+      ];
+      const exit = distances.reduce((nearest, candidate) => candidate.value < nearest.value ? candidate : nearest);
+      closestLocal[exit.axis] = exit.direction * (exit.axis === 'x'
+        ? o.halfWidth : exit.axis === 'z' ? o.halfDepth : o.halfHeight);
+    }
+    const closestWorld = toWorldPoint(o, closestLocal);
+    applySpherePush(bodyCenter, closestWorld, inside);
   }
 
   function resolveCylinderCollision(o, feetHeight) {
-    // Apply the same body-clearance rules to pillars, including the centered case.
-    const surfaceY = rayDownHeightOnCylinder(o, camera.position.x, camera.position.z);
-    if (surfaceY !== null && feetHeight >= surfaceY - 0.05) return;
-
-    const undersideY = rayUpHeightOnCylinder(o, camera.position.x, camera.position.z);
-    const bodyTop = feetHeight + BODY_HEIGHT + BODY_RADIUS;
-    if (undersideY !== null && feetHeight < undersideY && bodyTop >= undersideY - 0.05) return;
-
+    // Use the rotated cylinder contact normal to preserve uphill support.
     const bodyCenter = camera.position.clone();
     bodyCenter.y -= EYE_HEIGHT - BODY_HEIGHT;
     const localPoint = toLocalPoint(o, bodyCenter);
-    const verticalDistance = Math.max(0, Math.abs(localPoint.y) - o.halfHeight);
-    if (verticalDistance >= BODY_RADIUS) return;
+    const contact = cylinderContactLocal(o, localPoint);
+    const closestWorld = toWorldPoint(o, contact.point);
+    const worldNormal = contact.normal.clone().applyQuaternion(o.quaternion).normalize();
+    const offset = bodyCenter.clone().sub(closestWorld);
+    const signedDistance = offset.dot(worldNormal);
+    const distance = offset.length();
+    const touching = contact.penetration > 0 || distance < PLAYER_RADIUS;
+    if (!touching) return;
 
-    const horizontalDistance = Math.hypot(localPoint.x, localPoint.z);
-    const minimumDistance = o.radius + PLAYER_RADIUS;
-    if (horizontalDistance >= minimumDistance) return;
+    if (worldNormal.y > 0.35 && verticalVelocity <= 0 && signedDistance >= -0.05) return;
+    if (worldNormal.y > 0.35 && signedDistance >= 0 && signedDistance <= PLAYER_RADIUS + 0.05) return;
 
-    const pushDirection = horizontalDistance > 0.0001
-      ? new THREE.Vector2(localPoint.x, localPoint.z).normalize()
-      : new THREE.Vector2(1, 0);
-    const pushLocal = localPoint.clone();
-    pushLocal.x = pushDirection.x * minimumDistance;
-    pushLocal.z = pushDirection.y * minimumDistance;
-    const pushWorld = toWorldPoint(o, pushLocal);
-    camera.position.x = pushWorld.x;
-    camera.position.z = pushWorld.z;
+    const pushDistance = contact.penetration + PLAYER_RADIUS - Math.max(0, signedDistance);
+    if (pushDistance <= 0) return;
+    camera.position.x += worldNormal.x * pushDistance;
+    camera.position.z += worldNormal.z * pushDistance;
   }
 
   function resolveCircleCollision(o) {
@@ -1126,11 +1173,73 @@ export function bootClient() {
   };
 
   function resolveHorizontalCollisions(feetHeight) {
-    // Run the type-specific horizontal collision resolver for every world obstacle.
-    for (const o of nearbyObstacles(camera.position.x, camera.position.z)) {
-      const resolver = COLLISION_RESOLVERS[o.type];
-      if (resolver) resolver(o, feetHeight);
+    // Multiple passes let intersecting ramps resolve each other instead of depending on map order.
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      const beforeX = camera.position.x;
+      const beforeZ = camera.position.z;
+      for (const o of nearbyObstacles(camera.position.x, camera.position.z)) {
+        const resolver = COLLISION_RESOLVERS[o.type];
+        if (resolver) resolver(o, feetHeight);
+      }
+      moved = camera.position.x !== beforeX || camera.position.z !== beforeZ;
+      if (!moved) break;
     }
+  }
+
+  function moveHorizontallyWithCollisions(deltaX, deltaZ) {
+    let startX = camera.position.x;
+    let startZ = camera.position.z;
+    let remainingX = deltaX;
+    let remainingZ = deltaZ;
+    const feetHeight = camera.position.y - EYE_HEIGHT;
+
+    for (let iteration = 0; iteration < 3; iteration++) {
+      const candidateX = startX + remainingX;
+      const candidateZ = startZ + remainingZ;
+      camera.position.x = candidateX;
+      camera.position.z = candidateZ;
+      resolveHorizontalCollisions(feetHeight);
+
+      const correctionX = camera.position.x - candidateX;
+      const correctionZ = camera.position.z - candidateZ;
+      if (Math.hypot(correctionX, correctionZ) <= 0.00001) return;
+
+      const collisionNormalLength = Math.hypot(correctionX, correctionZ);
+      const normalX = correctionX / collisionNormalLength;
+      const normalZ = correctionZ / collisionNormalLength;
+      let safeT = 0;
+      let blockedT = 1;
+
+      // Locate the first colliding point along the requested movement.
+      for (let search = 0; search < 8; search++) {
+        const midpoint = (safeT + blockedT) / 2;
+        const testX = startX + remainingX * midpoint;
+        const testZ = startZ + remainingZ * midpoint;
+        camera.position.x = testX;
+        camera.position.z = testZ;
+        resolveHorizontalCollisions(feetHeight);
+        const testCorrection = Math.hypot(camera.position.x - testX, camera.position.z - testZ);
+        if (testCorrection > 0.00001) blockedT = midpoint;
+        else safeT = midpoint;
+      }
+
+      startX += remainingX * safeT;
+      startZ += remainingZ * safeT;
+      const leftoverFactor = 1 - safeT;
+      const leftoverX = remainingX * leftoverFactor;
+      const leftoverZ = remainingZ * leftoverFactor;
+      const normalMovement = leftoverX * normalX + leftoverZ * normalZ;
+      remainingX = leftoverX - normalX * normalMovement;
+      remainingZ = leftoverZ - normalZ * normalMovement;
+
+      camera.position.x = startX;
+      camera.position.z = startZ;
+      if (Math.hypot(remainingX, remainingZ) <= 0.00001) return;
+    }
+
+    camera.position.x = startX;
+    camera.position.z = startZ;
   }
 
   function updateVerticalMovement(delta) {
@@ -1184,7 +1293,10 @@ export function bootClient() {
         const landedOnSurface = previousFeetHeight >= surfaceY - 0.05
           && currentFeetHeight <= surfaceY;
         const alreadyOnSurface = currentFeetHeight >= surfaceY - 0.05;
-        if ((landedOnSurface || alreadyOnSurface) && surfaceY > supportHeight) {
+        const risingSupportContact = currentFeetHeight <= surfaceY + BODY_RADIUS
+          && previousFeetHeight <= surfaceY + BODY_HEIGHT + BODY_RADIUS;
+        if ((landedOnSurface || alreadyOnSurface || risingSupportContact)
+          && surfaceY > supportHeight) {
           supportHeight = surfaceY;
         }
       }
@@ -1255,8 +1367,7 @@ export function bootClient() {
         velocityZ = moveDirection.z * MOVE_SPEED;
 
         const step = MOVE_SPEED * delta;
-        controls.moveRight(dx * step);
-        controls.moveForward(-dz * step);
+        moveHorizontallyWithCollisions(moveDirection.x * step, moveDirection.z * step);
       } else {
         velocityX = 0;
         velocityZ = 0;
@@ -1295,11 +1406,8 @@ export function bootClient() {
         velocityZ *= scale;
       }
 
-      camera.position.x += velocityX * delta;
-      camera.position.z += velocityZ * delta;
+      moveHorizontallyWithCollisions(velocityX * delta, velocityZ * delta);
     }
-
-    resolveHorizontalCollisions(camera.position.y - EYE_HEIGHT);
   }
 
   let socket, audioContext, workletNode, micStream;

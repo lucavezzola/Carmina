@@ -117,7 +117,7 @@ def generate_world_map():
     ]
     for x, z, radius, height, color in column_specs:
         objects.append({
-            "type": "column", "x": x, "y": terrain_height_at(heights, x, z) + height / 2,
+            "type": "column", "x": x, "y": terrain_height_at(heights, x, z),
             "z": z, "radius": radius, "height": height, "rotation": {"x": 0, "y": 0, "z": 0},
             "color": color,
         })
@@ -143,9 +143,9 @@ def generate_world_map():
         (-4, 42, 8, 1.0, 14, -0.28, 0x766a5c),
     ]
     for x, z, width, height, depth, angle, color in ramp_specs:
-        center_y = terrain_height_at(heights, x, z) + 2.0
+        base_y = terrain_height_at(heights, x, z) + 2.0 - height / 2
         objects.append({
-            "type": "ramp", "x": x, "y": center_y, "z": z,
+            "type": "ramp", "x": x, "y": base_y, "z": z,
             "width": width, "height": height, "depth": depth,
             "rotation": {"x": angle, "y": 0, "z": 0}, "color": color,
         })
