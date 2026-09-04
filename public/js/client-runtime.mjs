@@ -1109,6 +1109,7 @@ export function bootClient() {
     const localPoint = toLocalPoint(o, bodyCenter);
     const closestLocal = closestPointOnBoxLocal(o, localPoint);
     const inside = closestLocal.distanceToSquared(localPoint) <= 0.000001;
+    let localNormal = localPoint.clone().sub(closestLocal);
     if (inside) {
       const distances = [
         { axis: 'x', value: o.halfWidth - localPoint.x, direction: 1 },
@@ -1121,6 +1122,12 @@ export function bootClient() {
       const exit = distances.reduce((nearest, candidate) => candidate.value < nearest.value ? candidate : nearest);
       closestLocal[exit.axis] = exit.direction * (exit.axis === 'x'
         ? o.halfWidth : exit.axis === 'z' ? o.halfDepth : o.halfHeight);
+      localNormal.set(0, 0, 0);
+      localNormal[exit.axis] = exit.direction;
+    }
+    if (localNormal.lengthSq() > 0.000001) {
+      const worldNormal = localNormal.applyQuaternion(o.quaternion).normalize();
+      if (worldNormal.y > 0.35 && verticalVelocity <= 0) return;
     }
     const closestWorld = toWorldPoint(o, closestLocal);
     applySpherePush(bodyCenter, closestWorld, inside);
@@ -1290,10 +1297,14 @@ export function bootClient() {
         if (!resolver) continue;
         const surfaceY = resolver(o, camera.position.x, camera.position.z);
         if (surfaceY === null) continue;
+        const undersideResolver = o.type === 'box' ? rayUpHeightOnBox : rayUpHeightOnCylinder;
+        const undersideY = undersideResolver(o, camera.position.x, camera.position.z);
+        if (undersideY !== null && currentFeetHeight < undersideY - 0.05) continue;
         const landedOnSurface = previousFeetHeight >= surfaceY - 0.05
           && currentFeetHeight <= surfaceY;
         const alreadyOnSurface = currentFeetHeight >= surfaceY - 0.05;
-        const risingSupportContact = currentFeetHeight <= surfaceY + BODY_RADIUS
+        const risingSupportContact = surfaceY >= currentFeetHeight - BODY_RADIUS
+          && surfaceY <= currentFeetHeight + BODY_RADIUS
           && previousFeetHeight <= surfaceY + BODY_HEIGHT + BODY_RADIUS;
         if ((landedOnSurface || alreadyOnSurface || risingSupportContact)
           && surfaceY > supportHeight) {
