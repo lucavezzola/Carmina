@@ -7,7 +7,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
 <style>
   html, body { margin: 0; height: 100%; background: #87ceeb; overflow: hidden; }
-  canvas#scene { position: fixed; inset: 0; display: block; }
+  canvas#scene {
+    position: fixed;
+    inset: 0;
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
   body { font-family: system-ui, sans-serif; color: #cbd3e6; }
 
   #overlay {

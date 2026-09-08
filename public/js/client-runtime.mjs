@@ -75,25 +75,32 @@ export function bootClient() {
 
   // Create the Three.js scene, camera, lighting, and renderer.
   const canvas = document.getElementById('scene');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(innerWidth, innerHeight);
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+  renderer.setPixelRatio(1);
+  
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
+  
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87ceeb);
   scene.fog = new THREE.Fog(0x87ceeb, 15, 55);
-
+  
   const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 200);
   camera.position.set(0, EYE_HEIGHT, 5);
   camera.rotation.order = 'YXZ';
-
-  window.addEventListener('resize', () => {
+  
+  const RENDER_SCALE = 0.28;
+  
+  function resizeRenderer() {
+    const w = Math.round(innerWidth * RENDER_SCALE);
+    const h = Math.round(innerHeight * RENDER_SCALE);
+    renderer.setSize(w, h, false); // false = non tocca canvas.style, resta a schermo intero
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-  });
+  }
+
+  resizeRenderer();
+  window.addEventListener('resize', resizeRenderer);
 
   scene.add(new THREE.HemisphereLight(0x9fb4c4, 0x2a2420, 0.65));
   const sun = new THREE.DirectionalLight(0xffe9c2, 1.15);
