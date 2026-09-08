@@ -1,12 +1,12 @@
 import { RTC_ICE_SERVERS, WSS_URL } from './client-config.mjs';
 
-export function bootClient() {
+export function bootClient(wsUrl) {
   // Prevent duplicate listeners and animation loops if the module is loaded twice.
   if (window.__carminaClientBooted) return;
   window.__carminaClientBooted = true;
 
   // Gameplay constants are kept here so movement, collision, and spell effects use one scale.
-  const WS_URL = WSS_URL;
+  const WS_URL = wsUrl || WSS_URL;
   const MOVE_SPEED = 8.0;
   const ACCELERATION = 20.0;
   const FRICTION = 10.0;

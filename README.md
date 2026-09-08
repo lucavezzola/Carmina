@@ -1,13 +1,12 @@
 "Carmina" (plural of _carmen_), meaning songs, poems, verses or chants, but also incantations, oracles, or ritual formulas, is a work-in-progress speech activated spells game, similar in concept to Mage Arena.
 
-How to run:
-- Python game server
-  > python .\server.py
-- Browser client (serves the public folder and supports .mjs modules)
-  > python .\dev_server.py
+How to run everything, including public Cloudflare quick tunnels:
 
-Then open:
-  > http://127.0.0.1:8000
+  > python .\run.py
+
+The command prints the public web link. It starts the game server on port 8765,
+the browser client on port 8080, and updates the client's WebSocket URL when the
+WebSocket tunnel is ready. Install `cloudflared` and make sure it is on PATH.
 
 How to run map-editor server (from "world_editor" folder):
   > python -m http.server 8000
