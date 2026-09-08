@@ -39,7 +39,7 @@ export function bootClient() {
   const FIRE_DEPTH = 5;
   const FIRE_RADIUS_NEAR = 0.5;
   const FIRE_RADIUS_FAR = 2.5;
-  const VOICE_CHAT_RADIUS = 15;
+  const VOICE_CHAT_RADIUS = 25;
 
   // Cache HUD elements used by damage and health updates.
   const healthFillEl = document.getElementById('healthbar-fill');
@@ -109,6 +109,39 @@ export function bootClient() {
   sun.shadow.bias = -0.0015;
   scene.add(sun);
   scene.add(new THREE.AmbientLight(0x3a4048, 0.35));
+
+  // Create the THREE.js scene for the player hand
+  const handScene = new THREE.Scene();
+  const handCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+  handCamera.position.z = 1;
+
+  const handTex = new THREE.TextureLoader().load('../assets/textures/resting_hands_spritesheet.png');
+  handTex.magFilter = THREE.NearestFilter;
+  handTex.repeat.set(1/10, 1/6); // Griglia 10x6
+
+  const handMat = new THREE.MeshBasicMaterial({ map: handTex, transparent: true, depthTest: false});
+  const handGeo = new THREE.PlaneGeometry(0.9, 0.9); // Size in NDC coords
+  const handMesh = new THREE.Mesh(handGeo, handMat);
+  handMesh.position.set(0.55, -0.61, 0); // Bottom-right of the screen
+  handScene.add(handMesh);
+
+  // Hand idle animation: advances one sprite-sheet frame every 1/12 s (retro feel)
+  const HAND_COLS = 10;
+  const HAND_ROWS = 6;
+  const HAND_TOTAL_FRAMES = 24;
+  const HAND_FRAME_DURATION = 1/10;
+  let handFrame = 0;
+  let handFrameAcc = 0;
+
+  function updateHandAnimation(delta) {
+    handFrameAcc += delta;
+    if (handFrameAcc < HAND_FRAME_DURATION) return;
+    handFrameAcc -= HAND_FRAME_DURATION;
+    handFrame = (handFrame + 1) % HAND_TOTAL_FRAMES;
+    const col = handFrame % HAND_COLS;
+    const row = Math.floor(handFrame / HAND_COLS);
+    handTex.offset.set(col / HAND_COLS, 1 - (row + 1) / HAND_ROWS);
+  }
 
   // Terrain is received from the server and sampled locally for smooth movement.
   let terrainData = null;
@@ -1988,6 +2021,9 @@ export function bootClient() {
   let lastFrameTime = performance.now();
 
   function animate() {
+    renderer.autoClear = false;
+    renderer.clear();
+
     // Main frame loop: input, physics, networking, effects, and rendering.
     requestAnimationFrame(animate);
     const now = performance.now();
@@ -2057,7 +2093,11 @@ export function bootClient() {
     });
 
     updateCooldownBarsIfDue(now);
+    updateHandAnimation(delta);
     renderer.render(scene, camera);
+    
+    renderer.clearDepth();
+    renderer.render(handScene, handCamera);
   }
 
   function updateShield(shield) {
