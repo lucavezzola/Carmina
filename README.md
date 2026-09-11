@@ -47,4 +47,6 @@ python dev_server.py --host 127.0.0.1 --port 8080
 - `world_editor/` — map editor files
 - `world_map*.json` — generated world data
 
-This is an in-progress prototype focused on the voice spell system and multiplayer loop, not a finished commercial game.
+This is a prototype focused on the voice spell system and multiplayer loop, not a finished commercial game.
+
+>**(This project was mostly implemented with the use of AI)**
