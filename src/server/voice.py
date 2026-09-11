@@ -8,6 +8,8 @@ import re
 
 from .config import SPELLS_LIST
 
+# Match spell names as standalone words so a recognizable phrase like
+# "fulmine" is detected without accidentally triggering on longer text.
 SPELL_PATTERN = re.compile(
     rf"(?<!\w)({'|'.join(re.escape(spell) for spell in sorted(SPELLS_LIST, key=len, reverse=True))})(?!\w)",
     re.IGNORECASE,

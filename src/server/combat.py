@@ -34,6 +34,8 @@ def projected_position(caster_slot, target_slot):
     target = players[target_slot]
     fx, fy, fz = forward_vector(caster["yaw"], caster["pitch"])
 
+    # Project the target onto the caster's forward axis to measure how far
+    # ahead it is and whether it falls within the spell cone width.
     dx = target["x"] - caster["x"]
     dy = target["y"] - caster["y"]
     dz = target["z"] - caster["z"]

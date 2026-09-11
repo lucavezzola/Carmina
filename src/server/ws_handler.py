@@ -33,9 +33,11 @@ async def handle_client(websocket, model, world_map):
     detected_in_utterance = set()
     last_partial_sent = None
 
-    print(f"Client connesso: {websocket.remote_address}")
+    print(f"Client connected: {websocket.remote_address}")
     recognizer = KaldiRecognizer(model, SAMPLE_RATE)
     spawn_x, spawn_y, spawn_z = spawn_position(slot, world_map)
+    # Store the new player state so the server can validate spells, movement,
+    # and health updates against a single authoritative source.
     players[slot] = {
         "websocket": websocket,
         "recognizer": recognizer,
@@ -147,5 +149,5 @@ async def handle_client(websocket, model, world_map):
         pass
     finally:
         del players[slot]
-        print(f"Giocatore disconnesso da slot {slot}")
+        print(f"Player disconnected from slot {slot}")
         await send_all({"type": "player_disconnected", "slot": slot})

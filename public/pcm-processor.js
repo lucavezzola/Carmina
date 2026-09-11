@@ -1,6 +1,6 @@
-// AudioWorkletProcessor: converte l'audio del microfono (float32, al sample
-// rate nativo del browser, spesso 44.1/48kHz) in PCM Int16 mono a 16kHz,
-// il formato che Vosk si aspetta in AcceptWaveform().
+// AudioWorkletProcessor: converts microphone audio (float32 at the browser's
+// native sample rate, often 44.1/48 kHz) into mono PCM Int16 at 16 kHz,
+// which is the format expected by Vosk in AcceptWaveform().
 
 class PCMProcessor extends AudioWorkletProcessor {
   constructor(options) {
@@ -34,7 +34,7 @@ class PCMProcessor extends AudioWorkletProcessor {
   process(inputs) {
     const input = inputs[0];
     if (!input || input.length === 0) return true;
-    const channelData = input[0]; // Mono: il primo canale
+    const channelData = input[0]; // Mono: use the first channel only.
 
     let sumSquares = 0;
     for (let i = 0; i < channelData.length; i++) {
@@ -46,9 +46,9 @@ class PCMProcessor extends AudioWorkletProcessor {
       this.voiceActive = true;
     }
 
-    // Downsampling "nearest neighbour": prende un campione ogni `ratio`.
-    // Sufficiente per keyword spotting; niente filtro anti-aliasing,
-    // non necessario per questo caso d'uso.
+    // Downsampling with the nearest-neighbour method: take one sample every
+    // `ratio` steps. This is enough for keyword spotting and keeps the
+    // processing lightweight for this use case.
     for (let i = 0; i < channelData.length; i += this.ratio) {
       const idx = Math.floor(i);
       if (idx >= channelData.length) break;

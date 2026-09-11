@@ -19,6 +19,8 @@ def free_slot():
 
 def spawn_position(slot, world_map=None):
     """Return a slot-specific spawn point projected onto the current terrain."""
+    # Spread players evenly around the arena so each slot starts in a different
+    # position while still keeping the same spawn ring radius.
     angle = (slot / MAX_PLAYERS) * math.pi * 2
     x = math.cos(angle) * SPAWN_RADIUS
     z = math.sin(angle) * SPAWN_RADIUS

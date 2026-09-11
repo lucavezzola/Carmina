@@ -7,24 +7,26 @@ server gameplay rules and the client visual logic.
 import math
 
 # Network endpoints and shared gameplay dimensions.
-SERVER_ADDRESS = "0.0.0.0"
+SERVER_ADDRESS = "0.0.0.0"  # Bind the game server to all local interfaces.
 SERVER_PORT = 8765
 
+# The spell names are matched against partial speech recognition output.
 SPELLS_LIST = ["fulmine", "scudo", "fuoco", "porta"]
-MODEL_PATH = "model"
+MODEL_PATH = "model"  # Local Vosk model directory used by the server.
 SAMPLE_RATE = 16000
 
 MAX_PLAYERS = 5
 SPELLS_COOLDOWNS = {"fulmine": 18000, "scudo": 3000, "fuoco": 7000, "porta": 10000}
 SPAWN_RADIUS = 3.0
 EYE_HEIGHT = 1.7
-players = {}
+players = {}  # In-memory player registry keyed by slot number.
 
 # Terrain settings must match the generated map and browser interpolation.
 TERRAIN_SIZE = 180.0
 TERRAIN_RESOLUTION = 65
 WORLD_MAP_PATH = "world_map_2.json"
 
+# Core combat values.
 MAX_HP = 100
 RESPAWN_DELAY_S = 3.0
 

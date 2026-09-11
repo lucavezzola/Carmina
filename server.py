@@ -1,10 +1,10 @@
 """
-Fase 5 - Server multiplayer con posizione in prima persona
-Rispetto alla Fase 4, il server ora tiene traccia anche di x/y/z/yaw di ogni
-giocatore (non solo slot e incantesimi) e la ritrasmette agli altri client,
-cosi' possono disegnare il modello del mago nel punto giusto della mappa.
+Game server entry point.
 
-Uso:
+The server keeps each player's x/y/z/yaw state, broadcasts it to connected
+clients, and listens for voice-triggered spell events.
+
+Usage:
     pip install vosk websockets
     python server.py
 """
@@ -23,31 +23,31 @@ from src.server.network import broadcast_dirty_positions
 from src.server.world import load_or_generate_world_map as load_world_map
 from src.server.ws_handler import handle_client
 
-# ===== CONFIGURAZIONE SERVER =====
-# Phase 1 bootstrap: keep runtime behavior stable while delegating the shared
+# ===== SERVER CONFIGURATION =====
+# Phase 1 bootstrap: keep runtime behavior stable while delegating shared
 # constants and world logic to the new package structure.
 
-# ===== CONFIGURAZIONE MODELLO =====
+# ===== MODEL CONFIGURATION =====
 # Moved to src/server/config.py.
 
-# ===== CONFIGURAZIONE GIOCO =====
+# ===== GAME CONFIGURATION =====
 # Moved to src/server/config.py.
 
-# ===== CREAZIONE MAPPA DI GIOCO =====
+# ===== GAME WORLD SETUP =====
 # Moved to src/server/world.py and kept as a shared world-state dependency.
 WORLD_MAP = load_world_map()
 
-# ===== CARICAMENTO MODELLO =====
-print(f"Caricamento del modello italiano dalla cartella `{MODEL_PATH}` ...")
+# ===== MODEL LOADING =====
+print(f"Loading the Italian Vosk model from `{MODEL_PATH}` ...")
 
 try:
-    model = Model(MODEL_PATH)  # Caricamento del modello Vosk
+    model = Model(MODEL_PATH)  # Load the Vosk model used for real-time spell recognition.
 except Exception:
-    print(f"Caricamento del modello fallito. Inserire un modello valido in `{MODEL_PATH}` e riprovare.")
-    exit()  # nota: "exit" da solo (senza parentesi) NON termina il programma, serve chiamarlo
+    print(f"Model loading failed. Add a valid model in `{MODEL_PATH}` and try again.")
+    exit()  # A bare exit() is intentionally kept for the current startup flow.
 
 
-# ===== RICERCA INCANTESIMI =====
+# ===== SPELL DETECTION =====
 # Moved to src/server/voice.py.
 
 async def main():
@@ -55,7 +55,7 @@ async def main():
     position_task = asyncio.create_task(broadcast_dirty_positions())
     try:
         async with websockets.serve(lambda ws: handle_client(ws, model, WORLD_MAP), SERVER_ADDRESS, SERVER_PORT):
-            print(f"server vocale in ascolto su wss://{SERVER_ADDRESS}:{SERVER_PORT}")
+            print(f"Voice server listening on wss://{SERVER_ADDRESS}:{SERVER_PORT}")
             await asyncio.Future()
     finally:
         position_task.cancel()

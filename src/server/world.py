@@ -14,6 +14,8 @@ from .config import TERRAIN_RESOLUTION, TERRAIN_SIZE, WORLD_MAP_PATH, MAX_PLAYER
 
 def generate_heightmap(seed=42):
     """Create deterministic terrain with rolling noise, a river, hills, and mountain ridges."""
+    # This deterministic seed keeps the map stable across server restarts so the
+    # same terrain is generated for all players.
     rng = random.Random(seed)
     waves = [
         {

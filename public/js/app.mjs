@@ -1,4 +1,5 @@
-// Keep the HTML entrypoint small; all browser behavior lives in the runtime module.
+// Keep the HTML entrypoint small; the full browser game logic lives in the
+// runtime module, which handles rendering, movement, audio, and multiplayer.
 import { bootClient } from './client-runtime.mjs';
 
 fetch('/runtime-config.json')

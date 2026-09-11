@@ -14,6 +14,8 @@ POSITION_BROADCAST_INTERVAL_S = 0.1
 async def send_all(message, exclude_slot=None):
     """Send a JSON message to all connected players except, optionally, one."""
     text = json.dumps(message)
+    # Only fan out to active players; this keeps state updates small and avoids
+    # broadcasting to the same client that just sent its own movement input.
     targets = [g["websocket"] for slot, g in players.items() if slot != exclude_slot]
     if not targets:
         return
