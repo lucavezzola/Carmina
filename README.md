@@ -1,20 +1,50 @@
-"Carmina" (plural of _carmen_), meaning songs, poems, verses or chants, but also incantations, oracles, or ritual formulas, is a work-in-progress speech activated spells game, similar in concept to Mage Arena.
+# Carmina
 
-How to run everything, including public Cloudflare quick tunnels:
+A small multiplayer spellcasting prototype built around a browser client and a Python backend.
 
-  > python .\run.py
+Features:
+- first-person movement and world rendering in the browser
+- WebSocket multiplayer state sync
+- voice-driven spell casting with Vosk
+- simple combat, cooldowns, and procedural map generation
+- a basic world editor for terrain and map data
 
-The command prints the public web link. It starts the game server on port 8765,
-the browser client on port 8080, and updates the client's WebSocket URL when the
-WebSocket tunnel is ready. Install `cloudflared` and make sure it is on PATH.
+## Run
 
-How to run map-editor server (from "world_editor" folder):
-  > python -m http.server 8000
+Start the full stack:
 
-How to open servers to the internet:
-- Python game server
-  > cloudflared tunnel --url http://localhost:8765
-- Change "WS_URL" in _index.html_ to the "http://" url given from the above command, but changing the protocol into "wss://" (e.g. "wss://list-of-random-words.trycloudflare.com").
-- HTTP server
-  > cloudflared tunnel --url http://localhost:8080
-- The "http://" url given by this last command is the one you should access on the browser.
+```bash
+python .\run.py
+```
+
+This starts:
+- the game server on port `8765`
+- the browser client on port `8080`
+- Cloudflare tunnels when `cloudflared` is installed and available on `PATH`
+
+## Manual startup
+
+```bash
+python server.py
+python dev_server.py --host 127.0.0.1 --port 8080
+```
+
+## Requirements
+
+- Python 3
+- Vosk model in `model/`
+- `websockets`
+- `vosk`
+- `cloudflared` for public tunnel support
+
+## Structure
+
+- `server.py` — game server entry point
+- `dev_server.py` — local web server for the browser client
+- `run.py` — launches the full stack
+- `src/server/` — networking, world logic, combat, voice matching
+- `public/` — browser game client and assets
+- `world_editor/` — map editor files
+- `world_map*.json` — generated world data
+
+This is an in-progress prototype focused on the voice spell system and multiplayer loop, not a finished commercial game.
